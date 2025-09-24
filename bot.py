@@ -1608,38 +1608,311 @@ function setupPanelToggles() {
         });
     });
 }
+function autoResizeTextarea(el) {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 240) + 'px';
+}
 
-async function loadAndActivatePersona(name) {
-    if (!name) { alert('Please select a persona to load.'); return; }
+async function reloadChat() {
+    if (!appState.activeChatId) return;
     try {
-        const persona = await api(`/personas/${name}`);
+        const messages = await api(`/${appState.activeChatId}/messages`);
+        DOM.chatMessages.innerHTML = '';
+        (messages || []).forEach(msg => {
+            if (!msg) return;
+            const finalThoughts = msg.final_thoughts || msg.finalThoughts || '';
+            addMessage(
+                msg.role || 'assistant',
+                msg.content || '',
+                msg.ts,
+                msg.thoughts || '',
+                msg.stats || '',
+                finalThoughts
+            );
+        });
+        scrollToBottom();
+    } catch (error) {
+        console.error('Failed to reload chat history:', error);
+        addMessage('system', '[ERROR] Failed to load chat history.');
+    }
+}
+
+async function loadSavedPersonasIntoSelect(selectElement) {
+    if (!selectElement) return;
+    try {
+        const personas = await api('/personas');
+        selectElement.innerHTML = '';
+        if (personas && personas.length) {
+            personas.forEach(name => {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                selectElement.appendChild(option);
+            });
+        } else {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'No saved personas';
+            selectElement.appendChild(option);
+        }
+    } catch (error) {
+        console.error('Failed to load saved personas:', error);
+        selectElement.innerHTML = '<option value="">Error loading personas</option>';
+    }
+}
+
+async function refreshPersonaLists() {
+    await loadSavedPersonasIntoSelect(DOM.savedPersonasList);
+    await loadSavedPersonasIntoSelect(DOM.sidePanelPersonaPreset);
+}
+
+async function refreshActivePersona() {
+    try {
+        const persona = await api(`/${appState.activeChatId}/persona`);
         DOM.personaEditor.value = JSON.stringify(persona, null, 2);
-        await api(`/${appState.activeChatId}/edit_message`, 'POST', { description: prompt });
+        DOM.personaAvatar.src = `/static/${persona.avatar || 'default_avatar.png'}`;
+        return persona;
+    } catch (error) {
+        console.error('Failed to load active persona:', error);
+        addMessage('system', '[ERROR] Unable to load the active persona.');
+        return null;
+    }
+}
+async function loadAndActivatePersona(name) {
+    if (!name) {
+        alert('Please select a persona to load.');
+        return;
+    }
+    try {
+        const persona = await api(`/personas/${encodeURIComponent(name)}`);
+        await api(`/${appState.activeChatId}/persona`, 'POST', persona);
+        DOM.personaEditor.value = JSON.stringify(persona, null, 2);
+        DOM.personaAvatar.src = `/static/${persona.avatar || 'default_avatar.png'}`;
+        addMessage('system', `Persona "${name}" loaded for this chat.`);
+    } catch (error) {
+        console.error('Failed to load persona:', error);
+        alert('Failed to load persona. Please check the server logs.');
+    }
+}
+
+async function generatePersonaFromPrompt() {
+    const prompt = DOM.personaPrompt.value.trim();
+    if (!prompt) {
+        alert('Please provide a short description to generate a persona.');
+        return;
+    }
+    DOM.generatePersonaBtn.disabled = true;
+    DOM.generatePersonaBtn.textContent = 'Generating...';
+    try {
+        const result = await api('/generate_persona', 'POST', { description: prompt });
+        if (result && result.persona) {
             DOM.personaEditor.value = JSON.stringify(result.persona, null, 2);
-        } finally {
-            DOM.generatePersonaBtn.textContent = 'Generate';
-            DOM.generatePersonaBtn.disabled = false;
+            DOM.personaAvatar.src = `/static/${result.persona.avatar || 'default_avatar.png'}`;
+        }
+    } catch (error) {
+        console.error('Failed to generate persona:', error);
+        alert('Failed to generate persona. Please try again.');
+    } finally {
+        DOM.generatePersonaBtn.textContent = 'Generate';
+        DOM.generatePersonaBtn.disabled = false;
+    }
+}
+
+async function savePersona() {
+    const name = DOM.savePersonaName.value.trim();
+    if (!name) {
+        alert('Please enter a name to save the persona.');
+        return;
+    }
+    let persona;
+    try {
+        persona = JSON.parse(DOM.personaEditor.value || '{}');
+    } catch (error) {
+        alert('Persona JSON is invalid. Please correct it before saving.');
+        return;
+    }
+    try {
+        await api(`/personas/${encodeURIComponent(name)}`, 'POST', persona);
+        await refreshPersonaLists();
+        DOM.savePersonaName.value = '';
+        addMessage('system', `Persona "${name}" saved.`);
+    } catch (error) {
+        console.error('Failed to save persona:', error);
+        alert('Failed to save persona.');
+    }
+}
+
+async function injectWorldEvent() {
+    const eventText = DOM.worldEventInput.value.trim();
+    if (!eventText) {
+        alert('Please describe the world event before injecting it.');
+        return;
+    }
+    try {
+        await api(`/${appState.activeChatId}/inject_event`, 'POST', {
+            event: eventText,
+            type: DOM.eventTypeSelect.value,
+            value: parseInt(DOM.eventValueInput.value, 10)
+        });
+        DOM.worldEventInput.value = '';
+        addMessage('system', `[WORLD EVENT INJECTED] ${eventText}`);
+    } catch (error) {
+        console.error('Failed to inject world event:', error);
+        alert('Failed to inject world event.');
+    }
+}
+
+async function markNewDay() {
+    try {
+        const response = await api(`/${appState.activeChatId}/new_day`, 'POST');
+        if (response.marker) {
+            addMessage('system', response.marker);
+        }
+        if (response.summary) {
+            addMessage('system', `Summary Generated:\n${response.summary}`);
+        }
+        await reloadChat();
+    } catch (error) {
+        console.error('Failed to mark a new day:', error);
+        alert('Failed to mark a new day.');
+    }
+}
+
+async function checkSummary() {
+    try {
+        const result = await api(`/${appState.activeChatId}/last_summary`);
+        const summary = result && result.summary ? result.summary.trim() : '';
+        DOM.summaryModalBody.textContent = summary || 'No summary available yet.';
+        DOM.summaryModal.style.display = 'flex';
+    } catch (error) {
+        console.error('Failed to fetch last summary:', error);
+        alert('Failed to fetch the last summary.');
+    }
+}
+
+async function testTextModel() {
+    const selectedModel = DOM.modelSelect.value;
+    if (!selectedModel) {
+        alert('Please select a text model to test.');
+        return;
+    }
+    addMessage('system', `Testing text model: ${selectedModel}...`);
+    try {
+        const res = await api('/test_text_model', 'POST', { model: selectedModel });
+        addMessage('system', res.success ? '✅ Text model test successful!' : `❌ Text model test failed: ${res.error}`);
+    } catch (error) {
+        console.error('Failed to test text model:', error);
+    }
+}
+
+function openModal(modal) {
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeModal(modal) {
+    if (modal) modal.style.display = 'none';
+}
+
+function setupEventListeners() {
+    DOM.sendBtn.addEventListener('click', sendMessage);
+    DOM.stopBtn.addEventListener('click', stopGeneration);
+
+    DOM.chatInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            sendMessage();
         }
     });
-    DOM.savePersonaBtn.addEventListener('click', async () => {
-        const name = DOM.savePersonaName.value.trim();
-        if (!name) { alert('Please enter a name to save the persona.'); return; }
-        try {
-            const persona = JSON.parse(DOM.personaEditor.value);
-            await api(`/personas/${name}`, 'POST', persona);
-            await api(`/${appState.activeChatId}/edit_message`, 'POST', { name });
-        DOM.newChatName.value = '';
-        await loadChatList();
-        switchChat(res.chat_id);
+    DOM.chatInput.addEventListener('input', () => {
+        const hasText = DOM.chatInput.value.trim().length > 0;
+        DOM.sendBtn.disabled = !hasText || appState.isGenerating;
+        autoResizeTextarea(DOM.chatInput);
     });
-    const settingsControls = [DOM.modelSelect, DOM.embeddingModelSelect, DOM.tempSlider, DOM.tokensSlider, DOM.thoughtSlider, DOM.talkSlider, DOM.persistentStatsToggle, DOM.enableMemoryToggle];
-    const sliders = { [DOM.tempSlider.id]: DOM.tempValue, [DOM.tokensSlider.id]: DOM.tokensValue, [DOM.thoughtSlider.id]: DOM.thoughtValue, [DOM.talkSlider.id]: DOM.talkValue };
+
+    DOM.addChatBtn.addEventListener('click', async () => {
+        const name = DOM.newChatName.value.trim();
+        if (!name) {
+            alert('Please enter a chat name.');
+            return;
+        }
+        try {
+            const res = await api('/chats/create', 'POST', { name });
+            DOM.newChatName.value = '';
+            await loadChatList();
+            if (res && res.chat_id) {
+                await switchChat(res.chat_id);
+            }
+        } catch (error) {
+            console.error('Failed to create chat:', error);
+            alert('Failed to create chat.');
+        }
+    });
+
+    DOM.reloadChatBtn.addEventListener('click', reloadChat);
+    DOM.clearMemoryBtn.addEventListener('click', clearMemory);
+    DOM.newDayBtn.addEventListener('click', markNewDay);
+    DOM.checkSummaryBtn.addEventListener('click', checkSummary);
+    DOM.forceSummaryBtn.addEventListener('click', forceSummarize);
+
+    DOM.injectEventBtn.addEventListener('click', injectWorldEvent);
+
+    DOM.testTextModelBtn.addEventListener('click', testTextModel);
+    DOM.testEmbedBtn.addEventListener('click', testEmbeddings);
+
+    DOM.openPersonaModalBtn.addEventListener('click', async () => {
+        openModal(DOM.personaModal);
+        await refreshPersonaLists();
+    });
+    DOM.personaModalClose.addEventListener('click', () => closeModal(DOM.personaModal));
+
+    DOM.sidePanelLoadBtn.addEventListener('click', () => loadAndActivatePersona(DOM.sidePanelPersonaPreset.value));
+    DOM.loadPersonaBtn.addEventListener('click', () => loadAndActivatePersona(DOM.savedPersonasList.value));
+    DOM.generatePersonaBtn.addEventListener('click', generatePersonaFromPrompt);
+    DOM.savePersonaBtn.addEventListener('click', savePersona);
+
+    DOM.openSysInfoModalBtn.addEventListener('click', async () => {
+        openModal(DOM.sysInfoModal);
+        try {
+            const info = await api('/system_info');
+            const versionEl = document.getElementById('sys-info-version');
+            const modelEl = document.getElementById('sys-info-model');
+            if (versionEl) versionEl.textContent = info.version || 'unknown';
+            if (modelEl) modelEl.textContent = info.model_name || 'unknown';
+        } catch (error) {
+            console.error('Failed to fetch system info:', error);
+        }
+    });
+    DOM.sysInfoModalClose.addEventListener('click', () => closeModal(DOM.sysInfoModal));
+
+    DOM.summaryModalClose.addEventListener('click', () => closeModal(DOM.summaryModal));
+
+    const settingsControls = [
+        DOM.modelSelect,
+        DOM.embeddingModelSelect,
+        DOM.tempSlider,
+        DOM.tokensSlider,
+        DOM.thoughtSlider,
+        DOM.talkSlider,
+        DOM.persistentStatsToggle,
+        DOM.enableMemoryToggle
+    ];
+    const sliderLabels = {
+        [DOM.tempSlider.id]: DOM.tempValue,
+        [DOM.tokensSlider.id]: DOM.tokensValue,
+        [DOM.thoughtSlider.id]: DOM.thoughtValue,
+        [DOM.talkSlider.id]: DOM.talkValue
+    };
     settingsControls.forEach(control => {
-        control.addEventListener('input', e => {
-            if (e.target.type === 'range') sliders[e.target.id].textContent = e.target.value;
+        control.addEventListener('input', (event) => {
+            if (event.target.type === 'range' && sliderLabels[event.target.id]) {
+                sliderLabels[event.target.id].textContent = event.target.value;
+            }
             saveSettings();
         });
     });
+    autoResizeTextarea(DOM.chatInput);
+    DOM.chatInput.dispatchEvent(new Event('input'));
 }
 
 async function loadChatList() {
@@ -1658,12 +1931,22 @@ async function loadChatList() {
         deleteBtn.className = 'delete-chat-btn'; deleteBtn.innerHTML = '&times;'; deleteBtn.title = `Delete chat "${chatId}"`;
         li.appendChild(nameSpan); li.appendChild(deleteBtn);
         if (chatId === appState.activeChatId) li.classList.add('active');
-        li.addEventListener('click', (e) => {
-            if (e.target !== deleteBtn) switchChat(chatId);
+        li.addEventListener('click', async (e) => {
+            if (e.target !== deleteBtn) {
+                try {
+                    await switchChat(chatId);
+                } catch (error) {
+                    console.error('Failed to switch chat:', error);
+                }
+            }
         });
-        deleteBtn.addEventListener('click', (e) => {
+        deleteBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            deleteChat(chatId);
+            try {
+                await deleteChat(chatId);
+            } catch (error) {
+                console.error('Failed to delete chat:', error);
+            }
         });
         DOM.chatList.appendChild(li);
     });
@@ -1682,8 +1965,10 @@ async function deleteChat(chatId) {
 }
 
 async function switchChat(chatId) {
+    if (!chatId) return;
     if (appState.activeChatId === chatId && appState.ws && appState.ws.readyState === WebSocket.OPEN) return;
     appState.activeChatId = chatId;
+    DOM.chatTitle.textContent = `Chat: ${chatId}`;
     console.log(`Switching to chat: ${appState.activeChatId}`);
     document.querySelectorAll('.chat-list-item.active').forEach(el => el.classList.remove('active'));
     document.querySelector(`.chat-list-item[data-chat-id="${chatId}"]`)?.classList.add('active');
@@ -1691,13 +1976,9 @@ async function switchChat(chatId) {
     stopGeneration();
     await connectWebSocket();
     await reloadChat();
-    const persona = await api(`/${appState.activeChatId}/edit_message`, 'POST', {
-        event: eventText,
-        type: DOM.eventTypeSelect.value,
-        value: parseInt(DOM.eventValueInput.value, 10)
-    });
-    DOM.worldEventInput.value = '';
-    addMessage('system', `[WORLD EVENT INJECTED] ${eventText}`);
+    await refreshActivePersona();
+    DOM.chatInput.value = '';
+    DOM.chatInput.dispatchEvent(new Event('input'));
 }
 
 async function forceSummarize() {
@@ -1719,12 +2000,12 @@ async function initializeApp() {
             appState.activeChatId = firstChat ? firstChat.dataset.chatId : 'default_chat';
             firstChat?.classList.add('active');
         }
+        DOM.chatTitle.textContent = `Chat: ${appState.activeChatId}`;
         DOM.persistentStatsToggle.checked = __PERSISTENT_STATS_ENABLED__;
         await connectWebSocket();
         await reloadChat();
-        await loadSavedPersonasIntoSelect(DOM.sidePanelPersonaPreset);
-        const persona = await api(`/${appState.activeChatId}/persona`);
-        DOM.personaAvatar.src = `/static/${persona.avatar || 'default_avatar.png'}`;
+        await refreshPersonaLists();
+        await refreshActivePersona();
     } catch (error) {
         console.error("Initialization failed:", error);
         addMessage('system', 'A critical error occurred during initialization. Some UI elements may not work. Please check the browser console (F12) for details.');

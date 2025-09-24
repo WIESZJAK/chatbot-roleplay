@@ -131,4 +131,3 @@ def load_emotional_state(chat_id: str) -> Dict[str, str]:
 def save_emotional_state(chat_id: str, stats: Dict[str, str]):
     with open(get_chat_file_path(chat_id, "emotional_state.json"), "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2, ensure_ascii=False)
-
