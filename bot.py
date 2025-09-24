@@ -1269,6 +1269,7 @@ function handleWebSocketMessage(data) {
                 renderMessage(appState.currentMessageContainer, parseFullResponse(appState.fullResponseText));
             }
             appState.fullResponseText = '';
+            appState.currentMessageContainer = null;
             break;
         case 'error':
             appState.isGenerating = false;
