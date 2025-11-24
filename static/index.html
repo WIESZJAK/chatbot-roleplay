@@ -60,10 +60,13 @@ body {
 }
 .thought-container {
   font-size: 0.85em; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; font-family: monospace;
-  border-bottom: 1px solid var(--border); padding: 10px 12px; margin-bottom: 8px;
+  border-bottom: 1px solid var(--border); padding: 8px 12px 10px; margin-bottom: 6px;
   cursor: pointer; transition: max-height 0.25s ease-in-out; position: relative;
   background: var(--bg-secondary);
   scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .thought-container::-webkit-scrollbar { display: none; }
 .thought-container .thought-header {
@@ -72,8 +75,9 @@ body {
 }
 .thought-container .thought-header .chevron { opacity: 0.8; transition: transform 0.2s ease; }
 .thought-container .thought-content {
-  display: block; overflow-y: auto; margin-top: 4px; padding-top: 0;
+  display: block; overflow-y: auto; margin-top: 0; padding-top: 0;
   max-height: 3.1em; /* ~2 lines */
+  line-height: 1.35;
 }
 .thought-container .thought-content::-webkit-scrollbar { display: none; }
 .thought-container.expanded { max-height: none; overflow: visible; }
@@ -505,6 +509,25 @@ function simpleMarkdown(text) {
         .replace(/\*(.*?)\*/g, '<em>$1</em>');
 }
 
+function escapeRegex(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stripThinkTags(text) {
+    return text.replace(/^<think\b[^>]*>/i, '').replace(/<\/think\s*>$/i, '').trim();
+}
+
+function extractWrappedSection(text, startTag, endTag) {
+    if (!text) return { section: '', remaining: text };
+    const pattern = new RegExp(`${escapeRegex(startTag)}([\s\S]*?)${escapeRegex(endTag)}`, 'i');
+    const match = text.match(pattern);
+    if (!match) return { section: '', remaining: text };
+
+    const section = (match[1] || '').trim();
+    const remaining = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
+    return { section, remaining };
+}
+
 function normalizeLabeledSection(text, header) {
     if (!text) return '';
     const trimmed = text.trim();
@@ -528,8 +551,32 @@ function extractPrefixedSection(text, label) {
 }
 
 function parseFullResponse(fullText) {
-    let tempText = fullText;
+    let tempText = fullText || '';
     let thoughts = '', stats = '', finalThoughts = '', cleanContent = '';
+
+    const wrappedSections = {
+        thoughts: extractWrappedSection(tempText, '<BEGIN_THOUGHTS>', '</BEGIN_THOUGHTS>'),
+        answer: extractWrappedSection(tempText, '<BEGIN_ANSWER>', '</BEGIN_ANSWER>'),
+        stats: extractWrappedSection(tempText, '<BEGIN_STATS>', '</BEGIN_STATS>'),
+        final: extractWrappedSection(tempText, '<BEGIN_FINAL>', '</BEGIN_FINAL>')
+    };
+
+    if (wrappedSections.thoughts.section) {
+        thoughts = stripThinkTags(wrappedSections.thoughts.section);
+        tempText = wrappedSections.thoughts.remaining;
+    }
+    if (wrappedSections.answer.section) {
+        cleanContent = wrappedSections.answer.section;
+        tempText = wrappedSections.answer.remaining;
+    }
+    if (wrappedSections.stats.section) {
+        stats = wrappedSections.stats.section;
+        tempText = wrappedSections.stats.remaining;
+    }
+    if (wrappedSections.final.section) {
+        finalThoughts = wrappedSections.final.section;
+        tempText = wrappedSections.final.remaining;
+    }
 
     const thinkOpenMatch = tempText.match(/<think\b[^>]*>/i);
     if (thinkOpenMatch) {
