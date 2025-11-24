@@ -126,12 +126,12 @@ DEFAULT_PERSONA = {
         "Your response should be in the first person. Engage in direct dialogue with the user."
     ),
     "output_instructions": (
-        "You must follow this structure for every response:\n"
-        "1. Start with internal reasoning wrapped in <think>...</think> tags.\n"
-        "2. Write your main reply to the user.\n"
-        "3. Add a stats block starting with exactly **[[Stats]]**.\n"
-        "4. End with a reflection block starting with exactly **[[Final Thoughts]]**.\n"
-        "Example order:\n<think>...</think>\nMain reply...\n\n**[[Stats]]**\nMood: ...\n\n**[[Final Thoughts]]**\n..."
+        "You must follow this STRICT structure for every response:\n"
+        "1. <think> ...internal thoughts... </think>\n"
+        "2. Main response to the user.\n"
+        "3. **[[Stats]]**\n(List your stats here)\n"
+        "4. **[[Final Thoughts]]**\n(Your reflection here)\n"
+        "DO NOT use tags like <BEGIN_ANSWER>, <END_ANSWER> or similar. Use ONLY the headers shown above."
     ),
     "censor_list": [],
     "prompt_examples": []
@@ -195,37 +195,35 @@ def _strip_think_tags(text: str) -> str:
 
 def parse_full_response(full_response: str) -> Dict[str, str]:
     response_data = {"thoughts": "", "content": "", "stats": "", "final_thoughts": ""}
+    # Usuwamy śmieciowe tagi, które bot zaczął generować
     text = full_response or ""
-
+    text = re.sub(r"</?END_ANSWER>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"</?END_FINAL>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"</?BEGIN_ANSWER>", "", text, flags=re.IGNORECASE)
+    
     # 1. Wyciągnij myśli <think>
     think_match = re.search(r"<think\b[^>]*>(.*?)</think\s*>", text, re.IGNORECASE | re.DOTALL)
     if think_match:
         response_data["thoughts"] = think_match.group(1).strip()
-        # Usuń myśli z tekstu, żeby nie przeszkadzały
         text = text.replace(think_match.group(0), "")
     
-    # 2. Wyciągnij Final Thoughts (szukamy od końca, żeby było bezpieczniej)
-    ft_pattern = r"\*\*\[\[Final Thoughts\]\]\*\*"
-    split_ft = re.split(ft_pattern, text, flags=re.IGNORECASE)
-    if len(split_ft) > 1:
-        # Ostatnia część to treść final thoughts
-        response_data["final_thoughts"] = split_ft[-1].strip()
-        # Wszystko przed to reszta
-        text = "".join(split_ft[:-1]).strip()
+    # 2. Wyciągnij Final Thoughts (elastyczny regex łapiący z gwiazdkami i bez)
+    # Szukamy od końca
+    ft_match = re.search(r"(\*\*\[\[Final Thoughts\]\]\*\*|\[\[Final Thoughts\]\])([\s\S]*)$", text, re.IGNORECASE)
+    if ft_match:
+        response_data["final_thoughts"] = ft_match.group(2).strip()
+        text = text[:ft_match.start()].strip()
 
-    # 3. Wyciągnij Stats
-    st_pattern = r"\*\*\[\[Stats\]\]\*\*"
-    split_st = re.split(st_pattern, text, flags=re.IGNORECASE)
-    if len(split_st) > 1:
-        response_data["stats"] = split_st[-1].strip()
-        text = "".join(split_st[:-1]).strip()
+    # 3. Wyciągnij Stats (z gwiazdkami i bez)
+    st_match = re.search(r"(\*\*\[\[Stats\]\]\*\*|\[\[Stats\]\])([\s\S]*)$", text, re.IGNORECASE)
+    if st_match:
+        response_data["stats"] = st_match.group(2).strip()
+        text = text[:st_match.start()].strip()
 
-    # 4. To co zostało, to główna odpowiedź (Answer)
-    # Usuń ewentualne puste tagi XML jeśli model je dodał z przyzwyczajenia
-    text = re.sub(r"<BEGIN_[A-Z]+>|<\/BEGIN_[A-Z]+>", "", text)
+    # 4. Reszta to content
     response_data["content"] = text.strip()
 
-    # Normalizacja nagłówków (dla frontendu, który ich oczekuje do zamiany na divy)
+    # Normalizacja (dodajemy nagłówki, jeśli ich brakuje w wyciętych fragmentach, dla spójności zapisu)
     if response_data["stats"]:
         response_data["stats"] = _normalize_labeled_block(response_data["stats"], "Stats")
     if response_data["final_thoughts"]:
