@@ -78,18 +78,20 @@ body {
 /* Stylizacja dymku Usera */
 .message.user .message-body { 
     background: var(--user-bubble); 
-    padding: 8px 14px; /* Mniejszy padding ogólny */
+    padding: 8px 12px; /* Mniejszy padding */
     border-radius: 18px 18px 0 18px; 
     text-align: left; 
+    min-width: 0;
 }
 
-/* --- KLUCZOWE: Usuwamy marginesy paragrafów wewnątrz dymku usera --- */
+/* 2. KLUCZOWE: Usuwamy marginesy z paragrafów wewnątrz dymku usera */
 .message.user .message-content p { 
-    margin-bottom: 0; 
+    margin-bottom: 0 !important; /* Usuwa odstęp na dole dymku */
+    margin-top: 0 !important;
 }
 
 .message.user .message-content {
-    padding-bottom: 0; /* Dodatkowe zabezpieczenie */
+    padding: 0 !important; /* Usuwa wewnętrzny padding kontenera treści */
 }
 
 /* Domyślne paragrafy dla reszty (asystent) mogą mieć mały odstęp */
@@ -136,21 +138,21 @@ body {
 .thought-container.expanded .thought-content { max-height: none; }
 .thought-container.expanded .chevron { transform: rotate(180deg); }
 
-/* --- STATS & FINAL THOUGHTS (ZACIEŚNIONE) --- */
+/* 3. Naprawa odstępów w Stats i Final Thoughts */
 .stats-container, .final-thoughts-container {
-  /* Zmniejszony odstęp od linii oddzielającej */
-  margin-top: 4px; 
-  padding-top: 4px; 
+  margin-top: 6px; 
+  padding-top: 6px; 
   border-top: 1px solid var(--border); 
-  font-size: 0.85em; 
-  width: 100%;
-  display: flex; flex-direction: column; gap: 0; /* Zero luki systemowej */
+  font-size: 0.85em;
+  display: flex; flex-direction: column; /* Układ flex pozwala kontrolować odstępy */
+  gap: 0; /* Brak luki między elementami flex */
 }
 
-/* Nagłówki - minimalny margines dolny */
+/* Style nagłówków (generowane przez JS) */
 .stats-header, .final-thoughts-header {
-    font-size: 0.95em; font-weight: 700;
-    margin-bottom: 2px; /* Bardzo blisko treści */
+    font-size: 0.95em; 
+    font-weight: 700; 
+    margin-bottom: 2px !important; /* Minimalny odstęp od treści */
     display: flex; align-items: center; gap: 6px;
 }
 
@@ -160,7 +162,6 @@ body {
 
 .stats-container p, .final-thoughts-container p { 
     margin: 0 !important; 
-    line-height: 1.4;
 }
 
 /* --- FOOTER --- */
