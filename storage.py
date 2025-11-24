@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from config import DEFAULT_CHAT_ID, DEFAULT_PERSONA, CHATS_DIR
+from config import DEFAULT_CHAT_ID, DEFAULT_PERSONA, CHATS_DIR, DEFAULT_SETTINGS
 
 
 def now_iso() -> str:
@@ -137,3 +137,20 @@ def delete_message_by_ts(chat_id: str, ts: str):
     messages = read_all_messages(chat_id)
     messages = [m for m in messages if m["ts"] != ts]
     save_all_messages(chat_id, messages)
+
+def load_chat_settings(chat_id: str) -> Dict[str, Any]:
+    settings_file = get_chat_file_path(chat_id, "settings.json")
+    if os.path.exists(settings_file):
+        try:
+            with open(settings_file, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+                # Łączymy z domyślnymi, żeby mieć pewność, że wszystkie klucze istnieją
+                # (gdybyś dodał nowe opcje w przyszłości)
+                return {**DEFAULT_SETTINGS, **saved}
+        except Exception:
+            pass
+    return DEFAULT_SETTINGS.copy()
+
+def save_chat_settings(chat_id: str, settings: Dict[str, Any]):
+    with open(get_chat_file_path(chat_id, "settings.json"), "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=2)

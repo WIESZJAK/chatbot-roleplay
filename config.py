@@ -17,14 +17,16 @@ DEFAULT_CHAT_ID = "default_chat"
 STATIC_DIR = os.path.join(APP_DIR, "static")
 PERSONAS_DIR = os.path.join(APP_DIR, "personas")
 
+# Zaktualizuj sekcję tworzenia folderów:
 os.makedirs(CHATS_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
 os.makedirs(PERSONAS_DIR, exist_ok=True)
+os.makedirs(os.path.join(PERSONAS_DIR, "img"), exist_ok=True) # NOWE: Folder na obrazki
 
 MODEL_API_URL = os.getenv("MODEL_API_URL", "http://localhost:1234/v1/chat/completions")
 EMBEDDING_API_URL = os.getenv("EMBEDDING_API_URL", "http://localhost:1234/v1/embeddings")
 MODEL_API_KEY = os.getenv("MODEL_API_KEY", "lm-studio")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m-qat")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5")
 TEXT_MODEL_NAME = os.getenv("TEXT_MODEL", "local-model")
 RECENT_MSGS = int(os.getenv("RECENT_MSGS", "20"))
 SUMMARIZE_EVERY = int(os.getenv("SUMMARIZE_EVERY", "30"))
@@ -57,4 +59,16 @@ DEFAULT_PERSONA: Dict[str, object] = {
     ),
     "censor_list": [],
     "prompt_examples": [],
+}
+
+# Domyślne ustawienia dla nowych czatów
+DEFAULT_SETTINGS = {
+    "model": "", # Pusty string oznacza domyślny model z LM Studio
+    "embedding_model": "",
+    "temperature": 1.0,
+    "max_tokens": 1024,
+    "thought_ratio": 0.5,
+    "talkativeness": 0.5,
+    "persistent_stats": True,
+    "enable_memory": True
 }

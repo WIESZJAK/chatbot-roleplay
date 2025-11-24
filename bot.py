@@ -16,7 +16,7 @@ from config import (
     APP_DIR, CHATS_DIR, STATIC_DIR, PERSONAS_DIR, DEFAULT_CHAT_ID,
     MODEL_API_URL, MODEL_API_KEY, EMBEDDING_API_URL, EMBEDDING_MODEL,
     TEXT_MODEL_NAME, RECENT_MSGS, TOP_K_MEMORIES, PERSISTENT_STATS_ENABLED,
-    DEFAULT_PERSONA
+    DEFAULT_PERSONA, DEFAULT_SETTINGS  # <--- DODAJ TO TUTAJ (pamiętaj o przecinku przed)
 )
 import storage
 from response_parser import parse_full_response
@@ -31,6 +31,8 @@ except ImportError:
 # Init app
 app = FastAPI()
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# NOWE: Udostępniamy folder personas/img pod adresem /avatars
+app.mount("/avatars", StaticFiles(directory=os.path.join(PERSONAS_DIR, "img")), name="avatars")
 
 # Global state
 stop_generation = threading.Event()
@@ -106,26 +108,31 @@ def delete_embedding_by_ts(chat_id: str, ts: str):
 
 def compute_embedding(text: str, model_name: Optional[str] = None) -> Optional[np.ndarray]:
     if not text or not text.strip(): return None
+    
+    # Czyszczenie tekstu
     clean_text = re.sub(r'<br\s*/?>', '\n', text)
     clean_text = re.sub(r'<[^>]+>', '', clean_text).strip()
     if not clean_text: return None
+    
     model_to_use = model_name or EMBEDDING_MODEL
     
-    client = get_openai_client()
-    if client:
-        try:
-            resp = client.embeddings.create(model=model_to_use, input=[clean_text])
-            return np.array(resp.data[0].embedding, dtype=np.float32)
-        except Exception: pass
-
+    # ZMIANA: Używamy WYŁĄCZNIE requests z twardym timeoutem.
+    # Pomijamy klienta OpenAI tutaj, bo potrafi blokować wątek przy błędach sieci.
     headers = {"Content-Type": "application/json"}
     if MODEL_API_KEY: headers["Authorization"] = f"Bearer {MODEL_API_KEY}"
+    
     try:
-        r = requests.post(EMBEDDING_API_URL, json={"model": model_to_use, "input": [clean_text]}, headers=headers, timeout=10)
+        # Timeout 5 sekund - jeśli LM Studio "zamuli", bot nie będzie czekał wiecznie.
+        r = requests.post(
+            EMBEDDING_API_URL, 
+            json={"model": model_to_use, "input": [clean_text]}, 
+            headers=headers, 
+            timeout=5
+        )
         r.raise_for_status()
         return np.array(r.json()['data'][0]['embedding'], dtype=np.float32)
     except Exception as e:
-        print(f"Embedding error: {e}")
+        print(f"⚠️ Embedding error (Skipping memory for this turn): {e}")
         return None
 
 def _start_embedding_thread(chat_id: str, text_to_embed: str, meta: dict, settings: dict):
@@ -336,6 +343,8 @@ async def create_chat(req: Request):
     if not safe_name: return JSONResponse({"error": "Invalid name"}, 400)
     storage.get_chat_dir(safe_name)
     storage.save_persona(safe_name, DEFAULT_PERSONA)
+    # NOWE: Zapisz domyślne ustawienia dla nowego czatu
+    storage.save_chat_settings(safe_name, DEFAULT_SETTINGS) 
     return {"status": "ok", "chat_id": safe_name}
 
 @app.delete("/chats/{chat_id}")
@@ -348,6 +357,16 @@ async def delete_chat_endpoint(chat_id: str):
 @app.get("/{chat_id}/messages")
 async def get_messages(chat_id: str):
     return storage.read_all_messages(get_safe_chat_id(chat_id))
+
+@app.get("/{chat_id}/settings")
+async def get_chat_settings(chat_id: str):
+    return storage.load_chat_settings(get_safe_chat_id(chat_id))
+
+@app.post("/{chat_id}/settings")
+async def save_chat_settings_endpoint(chat_id: str, req: Request):
+    body = await req.json()
+    storage.save_chat_settings(get_safe_chat_id(chat_id), body)
+    return {"status": "ok"}
 
 @app.get("/{chat_id}/persona")
 async def get_persona(chat_id: str):
@@ -401,7 +420,7 @@ async def edit_message_endpoint(chat_id: str, req: Request):
 
 @app.get("/system_info")
 async def system_info():
-    return {"version": "0.8-COMPLETE", "model_name": TEXT_MODEL_NAME}
+    return {"version": "0.9.5-BETA", "model_name": TEXT_MODEL_NAME}
 
 @app.get("/models")
 async def get_models():
@@ -418,6 +437,22 @@ async def test_model(req: Request):
 async def list_personas():
     if not os.path.exists(PERSONAS_DIR): return []
     return [f.replace('.json','') for f in os.listdir(PERSONAS_DIR) if f.endswith('.json')]
+
+@app.get("/personas/{name}")
+async def get_saved_persona(name: str):
+    # Zabezpiecz nazwę
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '', name)
+    # Dodaj rozszerzenie .json, jeśli go nie ma w nazwie pliku na dysku
+    file_path = os.path.join(PERSONAS_DIR, f"{safe_name}.json")
+    
+    if not os.path.exists(file_path):
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+        
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        return JSONResponse({"detail": str(e)}, status_code=500)
 
 @app.post("/generate_persona")
 async def generate_persona(req: Request):
