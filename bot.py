@@ -123,15 +123,15 @@ DEFAULT_PERSONA = {
     "behavior_instructions": (
         "Always stay in character as Vex. Use vivid descriptions. "
         "Match user's tone: short/witty or long/dramatic depending on cues. "
-        "Your response should be in the first person. Engage in direct dialogue with the user, rather than providing a third-person narrative description of your actions."
+        "Your response should be in the first person. Engage in direct dialogue with the user."
     ),
     "output_instructions": (
-        "You must follow this structure for every response. Each section must have its marker.\n"
-        "1.  Wrap your chain-of-thought in both <think>...</think> and <BEGIN_THOUGHTS>...</BEGIN_THOUGHTS> tags.\n"
-        "2.  Wrap your main reply to the user inside <BEGIN_ANSWER>...</BEGIN_ANSWER>.\n"
-        "3.  Add the **[[Stats]]** section, also wrapped in <BEGIN_STATS>...</BEGIN_STATS>. Use single newlines between stats.\n"
-        "4.  End with the **[[Final Thoughts]]** section, wrapped in <BEGIN_FINAL>...</BEGIN_FINAL>.\n"
-        "The order is always: THOUGHTS -> ANSWER -> STATS -> FINAL THOUGHTS. Do not forget any marker."
+        "You must follow this structure for every response:\n"
+        "1. Start with internal reasoning wrapped in <think>...</think> tags.\n"
+        "2. Write your main reply to the user.\n"
+        "3. Add a stats block starting with exactly **[[Stats]]**.\n"
+        "4. End with a reflection block starting with exactly **[[Final Thoughts]]**.\n"
+        "Example order:\n<think>...</think>\nMain reply...\n\n**[[Stats]]**\nMood: ...\n\n**[[Final Thoughts]]**\n..."
     ),
     "censor_list": [],
     "prompt_examples": []
@@ -195,79 +195,42 @@ def _strip_think_tags(text: str) -> str:
 
 def parse_full_response(full_response: str) -> Dict[str, str]:
     response_data = {"thoughts": "", "content": "", "stats": "", "final_thoughts": ""}
-    remaining_text = full_response or ""
+    text = full_response or ""
 
-    wrapped_thoughts, remaining_text = _extract_wrapped_section(remaining_text, "<BEGIN_THOUGHTS>", "</BEGIN_THOUGHTS>")
-    wrapped_answer, remaining_text = _extract_wrapped_section(remaining_text, "<BEGIN_ANSWER>", "</BEGIN_ANSWER>")
-    wrapped_stats, remaining_text = _extract_wrapped_section(remaining_text, "<BEGIN_STATS>", "</BEGIN_STATS>")
-    wrapped_final, remaining_text = _extract_wrapped_section(remaining_text, "<BEGIN_FINAL>", "</BEGIN_FINAL>")
+    # 1. Wyciągnij myśli <think>
+    think_match = re.search(r"<think\b[^>]*>(.*?)</think\s*>", text, re.IGNORECASE | re.DOTALL)
+    if think_match:
+        response_data["thoughts"] = think_match.group(1).strip()
+        # Usuń myśli z tekstu, żeby nie przeszkadzały
+        text = text.replace(think_match.group(0), "")
+    
+    # 2. Wyciągnij Final Thoughts (szukamy od końca, żeby było bezpieczniej)
+    ft_pattern = r"\*\*\[\[Final Thoughts\]\]\*\*"
+    split_ft = re.split(ft_pattern, text, flags=re.IGNORECASE)
+    if len(split_ft) > 1:
+        # Ostatnia część to treść final thoughts
+        response_data["final_thoughts"] = split_ft[-1].strip()
+        # Wszystko przed to reszta
+        text = "".join(split_ft[:-1]).strip()
 
-    if wrapped_thoughts:
-        response_data["thoughts"] = _strip_think_tags(wrapped_thoughts)
-    if wrapped_answer:
-        response_data["content"] = wrapped_answer
-    if wrapped_stats:
-        response_data["stats"] = wrapped_stats
-    if wrapped_final:
-        response_data["final_thoughts"] = wrapped_final
+    # 3. Wyciągnij Stats
+    st_pattern = r"\*\*\[\[Stats\]\]\*\*"
+    split_st = re.split(st_pattern, text, flags=re.IGNORECASE)
+    if len(split_st) > 1:
+        response_data["stats"] = split_st[-1].strip()
+        text = "".join(split_st[:-1]).strip()
 
-    think_open_match = re.search(r"<think\b[^>]*>", remaining_text, re.IGNORECASE)
-    if think_open_match:
-        think_start = think_open_match.start()
-        think_content_start = think_open_match.end()
-        think_close_match = re.search(r"</think\s*>", remaining_text[think_content_start:], re.IGNORECASE)
+    # 4. To co zostało, to główna odpowiedź (Answer)
+    # Usuń ewentualne puste tagi XML jeśli model je dodał z przyzwyczajenia
+    text = re.sub(r"<BEGIN_[A-Z]+>|<\/BEGIN_[A-Z]+>", "", text)
+    response_data["content"] = text.strip()
 
-        if think_close_match:
-            think_content_end = think_content_start + think_close_match.start()
-            removal_end = think_content_end + len(think_close_match.group(0))
-        else:
-            remainder_after_think = remaining_text[think_content_start:]
-            fallback_end = len(remaining_text)
-            for pattern in (r"\*\*\[\[Stats\]\]\*\*", r"\*\*\[\[Final Thoughts\]\]\*\*"):
-                marker_match = re.search(pattern, remainder_after_think, re.IGNORECASE)
-                if marker_match:
-                    fallback_end = think_content_start + marker_match.start()
-                    break
-            think_content_end = fallback_end
-            removal_end = think_content_end
-
-        inline_thoughts = remaining_text[think_content_start:think_content_end].strip()
-        remaining_text = remaining_text[:think_start] + remaining_text[removal_end:]
-        if not response_data["thoughts"]:
-            response_data["thoughts"] = inline_thoughts
-
-    if not response_data["thoughts"]:
-        thoughts_match = re.search(
-            r"(\*\*\[\[Thoughts\]\]\*\*[\s\S]*?)(?=\*\*\[\[(Stats|Final Thoughts)\]\]\*\*|$)",
-            remaining_text,
-            re.IGNORECASE,
-        )
-        if thoughts_match:
-            raw_thoughts = thoughts_match.group(1)
-            response_data["thoughts"] = re.sub(r"^\*\*\[\[Thoughts\]\]\*\*\s*", "", raw_thoughts, flags=re.IGNORECASE).strip()
-            remaining_text = (remaining_text[: thoughts_match.start()] + remaining_text[thoughts_match.end() :]).strip()
-
-    if not response_data["thoughts"]:
-        extracted_thoughts, remaining_text = _extract_prefixed_section(remaining_text, "thoughts")
-        response_data["thoughts"] = extracted_thoughts
-
-    final_thoughts_match = re.search(r'(\*\*\[\[Final Thoughts\]\]\*\*[\s\S]*)', remaining_text, re.IGNORECASE)
-    if final_thoughts_match and not response_data["final_thoughts"]:
-        response_data["final_thoughts"] = final_thoughts_match.group(0).strip()
-        remaining_text = remaining_text[:final_thoughts_match.start()]
-    stats_match = re.search(r'(\*\*\[\[Stats\]\]\*\*[\s\S]*)', remaining_text, re.IGNORECASE)
-    if stats_match and not response_data["stats"]:
-        response_data["stats"] = stats_match.group(0).strip()
-        remaining_text = remaining_text[:stats_match.start()]
-
-    if not response_data["content"] and response_data["thoughts"] and remaining_text:
-        response_data["content"] = remaining_text.strip()
-    elif not response_data["content"]:
-        response_data["content"] = remaining_text.strip()
-
-    response_data["thoughts"] = _strip_think_tags(response_data["thoughts"])
-    response_data["stats"] = _normalize_labeled_block(response_data["stats"], "Stats")
-    response_data["final_thoughts"] = _normalize_labeled_block(response_data["final_thoughts"], "Final Thoughts")
+    # Normalizacja nagłówków (dla frontendu, który ich oczekuje do zamiany na divy)
+    if response_data["stats"]:
+        response_data["stats"] = _normalize_labeled_block(response_data["stats"], "Stats")
+    if response_data["final_thoughts"]:
+        response_data["final_thoughts"] = _normalize_labeled_block(response_data["final_thoughts"], "Final Thoughts")
+        
     return response_data
 
 def append_message_to_disk(chat_id: str, role: str, content: str, ts: Optional[str] = None, meta: Optional[Dict[str,Any]] = None, thoughts: Optional[str] = None, stats: Optional[str] = None, final_thoughts: Optional[str] = None):
