@@ -663,7 +663,9 @@ def build_prompt_context(chat_id: str, user_msg: str, settings: Dict[str, Any]) 
         if r.get("role") in ("user", "assistant") and r.get("content"):
             messages.append({"role": r["role"], "content": r.get("content")})
 
-    messages.append({"role": "user", "content": user_msg})
+    # Avoid duplicating the latest user message if it was already persisted
+    if not history or history[-1].get("role") != "user" or history[-1].get("content", "") != user_msg:
+        messages.append({"role": "user", "content": user_msg})
 
     messages.append({"role": "assistant", "content": "<think>"})
 
@@ -1528,14 +1530,11 @@ async function sendMessage() {
         appState.isGenerating = true;
         updateStatus('generating');
         appState.currentMessageContainer = addMessage('assistant');
-const body = appState.currentMessageContainer.querySelector('.message-body');
-// Pre-create streaming skeleton so structure is visible from the start
-body.innerHTML = [
-  '<div class="thought-container"><div class="thought-content">...</div></div>',
-  '<div class="message-content">...</div>',
-  '<div class="stats-container"><strong>[[Stats]]</strong><br>...</div>',
-  '<div class="final-thoughts-container"><strong>[[Final Thoughts]]</strong><br>...</div>'
-].join('');
+        const body = appState.currentMessageContainer.querySelector('.message-body');
+        // Show a minimal animated placeholder instead of the full template
+        if (body) {
+            body.innerHTML = '<div class="responding-indicator generating-text">Generating<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div>';
+        }
     } catch (error) {
         addMessage('system', '[ERROR] Connection failed. Please check the server.');
     }
