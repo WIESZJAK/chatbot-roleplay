@@ -166,8 +166,8 @@ def parse_full_response(full_response: str) -> Dict[str, str]:
         remaining_text = remaining_text[:stats_match.start()]
 
     response_data["content"] = remaining_text.strip()
-    if full_response.strip() and not response_data["thoughts"]:
-        response_data["thoughts"] = "No explicit thinking was provided. Summarize your reasoning here next time."
+    if not response_data["thoughts"]:
+        response_data["thoughts"] = ""
     response_data["stats"] = _normalize_labeled_block(response_data["stats"], "Stats")
     response_data["final_thoughts"] = _normalize_labeled_block(response_data["final_thoughts"], "Final Thoughts")
     return response_data
@@ -622,6 +622,10 @@ def build_prompt_context(chat_id: str, user_msg: str, settings: Dict[str, Any]) 
     if float(settings.get("talkativeness", 0.5)) < 0.2: system_parts.append("Talkativeness: VERY LOW. Your response (excluding thoughts/stats) MUST be extremely concise (1-2 sentences).")
     elif float(settings.get("talkativeness", 0.5)) > 0.8: system_parts.append("Talkativeness: VERY HIGH. Your response (excluding thoughts/stats) MUST be very long and descriptive.")
 
+    system_parts.append(
+        "Stay strictly in the first person. Describe any small actions inline using *action* markup within your dialogue, and avoid third-person narration or stage directions."
+    )
+
     recent_messages = read_last_messages(chat_id, 5)
     greeting_delivered = any("New day greeting acknowledged" in m.get("content", "") for m in recent_messages if m.get("role") == "system")
     last_sys_msg = next((msg['content'] for msg in reversed(recent_messages) if msg['role'] == 'system'), "")
@@ -722,6 +726,9 @@ body {
 .message-content {
     font-size: 0.95rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
     position: relative; overflow-wrap: anywhere; padding: 4px 0;
+}
+.message-content em, .thought-container em, .stats-container em, .final-thoughts-container em {
+  color: rgba(255, 255, 255, 0.7);
 }
 .message.user .message-body { background: var(--user-bubble); padding: 10px 15px; border-radius: 18px; text-align: left; }
 .message.system .message-body {
@@ -1197,7 +1204,7 @@ function parseFullResponse(fullText) {
     }
     cleanContent = tempText.trim();
 
-    thoughts = thoughts || (fullText.trim() ? 'No explicit thinking was provided. Summarize your reasoning here next time.' : '');
+    thoughts = thoughts || '';
     stats = normalizeLabeledSection(stats, 'Stats');
     finalThoughts = normalizeLabeledSection(finalThoughts, 'Final Thoughts');
 
