@@ -214,6 +214,8 @@ body {
   .collapse-handle { display: block; margin-bottom: 15px; }
 }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
 </head>
 <body>
 <div id="app-container" class="container">
@@ -502,11 +504,24 @@ function toggleSendStopButtons(showStop) {
   DOM.stopBtn.style.display = showStop ? 'flex' : 'none';
 }
 
-function simpleMarkdown(text) {
+function renderMarkdown(text) {
     if (typeof text !== 'string') return '';
+    if (window.marked && window.DOMPurify) {
+        const rawHtml = marked.parse(text, { gfm: true, breaks: true });
+        return DOMPurify.sanitize(rawHtml);
+    }
+    // Fallback parser for environments without the libraries
     return text
+        .replace(/^######\s*(.*)$/gm, '<h6>$1</h6>')
+        .replace(/^#####\s*(.*)$/gm, '<h5>$1</h5>')
+        .replace(/^####\s*(.*)$/gm, '<h4>$1</h4>')
+        .replace(/^###\s*(.*)$/gm, '<h3>$1</h3>')
+        .replace(/^##\s*(.*)$/gm, '<h2>$1</h2>')
+        .replace(/^#\s*(.*)$/gm, '<h1>$1</h1>')
+        .replace(/^\s*[-*]\s+(.*)$/gm, '<ul><li>$1</li></ul>')
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.*?)\*/g, '<em>$1</em>');
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/\n/g, '<br>');
 }
 
 function escapeRegex(text) {
@@ -674,7 +689,7 @@ function updateOrCreateElement(parent, selector, content, position = 'append') {
     }
 
     element.style.display = 'block';
-    const htmlContent = simpleMarkdown(content).replace(/\n/g, '<br>');
+    const htmlContent = renderMarkdown(content);
 
     if (selector === '.thought-container') {
         const wasExpanded = element.classList.contains('expanded');
@@ -832,7 +847,7 @@ function handleWebSocketMessage(data) {
             break;
         case 'memory_info':
             let memoryHtml = data.content.replace('Relevant memories:', '').trim();
-            memoryHtml = simpleMarkdown(memoryHtml).replace(/\n/g, '<br>');
+            memoryHtml = renderMarkdown(memoryHtml);
             DOM.memoryContent.innerHTML = memoryHtml;
             DOM.memoryPanel.style.display = 'flex';
             break;
