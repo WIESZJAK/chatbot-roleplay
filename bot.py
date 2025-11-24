@@ -6,6 +6,7 @@ pip install fastapi uvicorn requests python-dotenv numpy Pillow faiss-cpu openai
 uvicorn gem:app --reload --port 7860
 """
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from response_parser import parse_full_response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import os, time, json, threading, asyncio, requests, re, shutil
