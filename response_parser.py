@@ -21,16 +21,23 @@ def parse_full_response(full_response: str) -> Dict[str, str]:
         think_start = think_open_match.start()
         think_content_start = think_open_match.end()
         think_close_match = re.search(r"</think\\s*>", remaining_text[think_content_start:], re.IGNORECASE)
+
         if think_close_match:
             think_content_end = think_content_start + think_close_match.start()
-            response_data["thoughts"] = remaining_text[think_content_start:think_content_end].strip()
-            remaining_text = (
-                remaining_text[:think_start]
-                + remaining_text[think_content_end + len(think_close_match.group(0)) :]
-            )
+            removal_end = think_content_end + len(think_close_match.group(0))
         else:
-            response_data["thoughts"] = remaining_text[think_content_start:].strip()
-            remaining_text = remaining_text[:think_start]
+            remainder_after_think = remaining_text[think_content_start:]
+            fallback_end = len(remaining_text)
+            for pattern in (r"\*\*\[\[Stats\]\]\*\*", r"\*\*\[\[Final Thoughts\]\]\*\*"):
+                marker_match = re.search(pattern, remainder_after_think, re.IGNORECASE)
+                if marker_match:
+                    fallback_end = think_content_start + marker_match.start()
+                    break
+            think_content_end = fallback_end
+            removal_end = think_content_end
+
+        response_data["thoughts"] = remaining_text[think_content_start:think_content_end].strip()
+        remaining_text = remaining_text[:think_start] + remaining_text[removal_end:]
 
     final_thoughts_match = re.search(r"(\*\*\[\[Final Thoughts\]\]\*\*[\s\S]*)", remaining_text, re.IGNORECASE)
     if final_thoughts_match:
