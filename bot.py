@@ -126,12 +126,15 @@ DEFAULT_PERSONA = {
         "Your response should be in the first person. Engage in direct dialogue with the user."
     ),
     "output_instructions": (
-        "You must follow this STRICT structure for every response:\n"
-        "1. <think> ...internal thoughts... </think>\n"
-        "2. Main response to the user.\n"
-        "3. **[[Stats]]**\n(List your stats here)\n"
-        "4. **[[Final Thoughts]]**\n(Your reflection here)\n"
-        "DO NOT use tags like <BEGIN_ANSWER>, <END_ANSWER> or similar. Use ONLY the headers shown above."
+        "You MUST follow this exact structure for EVERY response:\n\n"
+        "<think>\n"
+        "(Write your internal monologue here. Decide how to react.)\n"
+        "</think>\n\n"
+        "(Write your main response to the user here.)\n\n"
+        "**[[Stats]]**\n"
+        "(List 2-3 emotional stats, e.g., Suspicion: 50%)\n\n"
+        "**[[Final Thoughts]]**\n"
+        "(Write a short, secret reflection about the user.)\n"
     ),
     "censor_list": [],
     "prompt_examples": []
@@ -195,26 +198,22 @@ def _strip_think_tags(text: str) -> str:
 
 def parse_full_response(full_response: str) -> Dict[str, str]:
     response_data = {"thoughts": "", "content": "", "stats": "", "final_thoughts": ""}
-    # Usuwamy śmieciowe tagi, które bot zaczął generować
     text = full_response or ""
-    text = re.sub(r"</?END_ANSWER>", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"</?END_FINAL>", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"</?BEGIN_ANSWER>", "", text, flags=re.IGNORECASE)
-    
-    # 1. Wyciągnij myśli <think>
+
+    # 1. Myśli (obsługa standardowa)
     think_match = re.search(r"<think\b[^>]*>(.*?)</think\s*>", text, re.IGNORECASE | re.DOTALL)
     if think_match:
         response_data["thoughts"] = think_match.group(1).strip()
         text = text.replace(think_match.group(0), "")
     
-    # 2. Wyciągnij Final Thoughts (elastyczny regex łapiący z gwiazdkami i bez)
-    # Szukamy od końca
+    # 2. Final Thoughts (szukamy od dołu)
+    # Regex łapie: **[[Final Thoughts]]** ORAZ [[Final Thoughts]] (bez gwiazdek)
     ft_match = re.search(r"(\*\*\[\[Final Thoughts\]\]\*\*|\[\[Final Thoughts\]\])([\s\S]*)$", text, re.IGNORECASE)
     if ft_match:
         response_data["final_thoughts"] = ft_match.group(2).strip()
         text = text[:ft_match.start()].strip()
 
-    # 3. Wyciągnij Stats (z gwiazdkami i bez)
+    # 3. Stats (szukamy od dołu w tym co zostało)
     st_match = re.search(r"(\*\*\[\[Stats\]\]\*\*|\[\[Stats\]\])([\s\S]*)$", text, re.IGNORECASE)
     if st_match:
         response_data["stats"] = st_match.group(2).strip()
@@ -223,7 +222,7 @@ def parse_full_response(full_response: str) -> Dict[str, str]:
     # 4. Reszta to content
     response_data["content"] = text.strip()
 
-    # Normalizacja (dodajemy nagłówki, jeśli ich brakuje w wyciętych fragmentach, dla spójności zapisu)
+    # Normalizacja dla spójności
     if response_data["stats"]:
         response_data["stats"] = _normalize_labeled_block(response_data["stats"], "Stats")
     if response_data["final_thoughts"]:
