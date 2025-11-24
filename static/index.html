@@ -637,12 +637,13 @@ function stripThinkTags(text) {
 
 function formatStatsContent(text) {
     if (!text) return '';
-    // 1. Usuń nagłówek tekstowy (z gwiazdkami lub bez)
-    let clean = text.replace(/(\*\*\[\[Stats\]\]\*\*|\[\[Stats\]\]|Stats:)/gi, '').trim();
     
-    // 2. Napraw nowe linie: Zamień przecinki na <br> lub nowe linie
-    // Model często pisze: "Mood: Happy, Health: 100" -> chcemy to w pionie.
-    // Szukamy przecinka, po którym jest spacja (opcjonalnie) i litera.
+    // 1. Najpierw usuwamy nagłówek tekstowy (To naprawia Twój błąd duplikatu!)
+    // Usuwa: **[[Stats]]**, [[Stats]], Stats: itd.
+    let clean = text.replace(/(\*\*|)\s*\[\[Stats\]\]\s*(\*\*|:|)/gi, '').trim();
+    
+    // 2. Zamieniamy przecinki na nowe linie (żeby statsy były pod sobą)
+    // Szuka przecinka po którym jest spacja, np. "Health: 100, Mana: 50" -> Enter
     clean = clean.replace(/,\s/g, '\n');
     
     return clean;
@@ -705,8 +706,8 @@ function extractPrefixedSection(text, label) {
 
 function cleanFinalThoughts(text) {
     if (!text) return '';
-    // Po prostu usuń nagłówek, resztę zostaw
-    return text.replace(/(\*\*\[\[Final Thoughts\]\]\*\*|\[\[Final Thoughts\]\]|Final Thoughts:)/gi, '').trim();
+    // To wyrażenie regularne usuwa: **[[Final Thoughts]]**, [[Final Thoughts]], spacje i gwiazdki wokół
+    return text.replace(/(\*\*|)\s*\[\[Final Thoughts\]\]\s*(\*\*|:|)/gi, '').trim();
 }
 
 function parseFullResponse(fullText) {
@@ -718,38 +719,40 @@ function parseFullResponse(fullText) {
         const match = tempText.match(markerRegex);
         if (match) {
             const rawContent = match[0]; // Całość z nagłówkiem
-            tempText = tempText.substring(0, match.index).trim();
+            tempText = tempText.substring(0, match.index).trim(); // Ucinamy z głównego tekstu
             return rawContent;
         }
         return '';
     };
 
-    // 1. Wyciągnij i WYCZYŚĆ Final Thoughts
+    // 1. Wyciągnij Final Thoughts
     let rawFinal = extractSectionFromEnd(/(\*\*\[\[Final Thoughts\]\]\*\*|\[\[Final Thoughts\]\])([\s\S]*)$/i);
     if (rawFinal) {
+        // Tutaj następuje czyszczenie nagłówka tekstowego
         finalThoughts = cleanFinalThoughts(rawFinal);
     }
 
-    // 2. Wyciągnij, WYCZYŚĆ i SFORMATUJ Stats
+    // 2. Wyciągnij Stats
     let rawStats = extractSectionFromEnd(/(\*\*\[\[Stats\]\]\*\*|\[\[Stats\]\])([\s\S]*)$/i);
     if (rawStats) {
+        // Tutaj następuje czyszczenie nagłówka tekstowego i formatowanie linii
         stats = formatStatsContent(rawStats);
     }
 
-    // 3. Obsługa Myśli (Force Think Logic)
+    // 3. Obsługa Myśli (Streaming)
     const closingThinkMatch = tempText.match(/<\/think>/i);
     if (closingThinkMatch) {
         const splitIndex = closingThinkMatch.index;
         thoughts = tempText.substring(0, splitIndex);
         cleanContent = tempText.substring(splitIndex + closingThinkMatch[0].length).trim();
     } else {
-        // Sprawdzamy czy bot zaczął odpowiadać tagiem Answer (rzadkie, ale możliwe)
+        // Brak zamknięcia myśli? Sprawdzamy czy to nie jest sam początek odpowiedzi
         const answerTag = tempText.match(/<BEGIN_ANSWER>/i);
         if (answerTag) {
              thoughts = tempText.substring(0, answerTag.index);
              cleanContent = tempText.substring(answerTag.index + answerTag[0].length).trim();
         } else {
-             // Jeśli nie ma zamknięcia myśli ani Stats/Final, to wszystko jest myślą (streaming)
+             // Zakładamy, że na początku leci myśl (Force Think)
              thoughts = tempText;
              cleanContent = ''; 
         }
@@ -757,7 +760,6 @@ function parseFullResponse(fullText) {
 
     if (thoughts) thoughts = stripThinkTags(thoughts);
 
-    // WAŻNE: Zwracamy czyste dane. Nagłówki HTML doda dopiero funkcja updateOrCreateElement.
     return { content: cleanContent, thoughts, stats, final_thoughts: finalThoughts };
 }
 
