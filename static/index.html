@@ -41,10 +41,14 @@ body {
 .chat-messages::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
 .message { display: flex; flex-direction: column; gap: 4px; max-width: 80%; animation: fadeIn 0.3s ease-in; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-.message.user { align-self: flex-end; }
-.message.assistant { align-self: flex-start; }
-.message.system { align-self: center; max-width: 90%; opacity: 0.7; }
-.message-body { display: flex; flex-direction: column; width: 100%; }
+/* ZMIANA: Dodano align-items, aby dymki nie rozciągały się na całą szerokość */
+.message { display: flex; flex-direction: column; gap: 4px; max-width: 80%; animation: fadeIn 0.3s ease-in; }
+.message.user { align-self: flex-end; align-items: flex-end; } 
+.message.assistant { align-self: flex-start; align-items: flex-start; }
+.message.system { align-self: center; align-items: center; max-width: 90%; opacity: 0.7; }
+
+/* ZMIANA: Usunięto width: 100% i dodano min-width: 0 */
+.message-body { display: flex; flex-direction: column; min-width: 0; }
 .message-content {
     font-size: 0.95rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
     position: relative; overflow-wrap: anywhere; padding: 4px 0;
@@ -529,18 +533,42 @@ function escapeRegex(text) {
 }
 
 function stripThinkTags(text) {
-    return text.replace(/^<think\b[^>]*>/i, '').replace(/<\/think\s*>$/i, '').trim();
+    if (!text) return '';
+    return text
+        .replace(/<think\b[^>]*>/gi, '')   // Usuń <think> (globalnie, case-insensitive)
+        .replace(/<\/think\s*>/gi, '')      // Usuń </think>
+        .replace(/<BEGIN_THOUGHTS>/gi, '')  // Usuń tagi BEGIN jeśli zostały
+        .replace(/<\/BEGIN_THOUGHTS>/gi, '')
+        .trim();
 }
 
 function extractWrappedSection(text, startTag, endTag) {
     if (!text) return { section: '', remaining: text };
-    const pattern = new RegExp(`${escapeRegex(startTag)}([\s\S]*?)${escapeRegex(endTag)}`, 'i');
-    const match = text.match(pattern);
-    if (!match) return { section: '', remaining: text };
+    
+    const startEsc = escapeRegex(startTag);
+    const endEsc = escapeRegex(endTag);
+    
+    // 1. Kompletny blok
+    const completePattern = new RegExp(`${startEsc}([\\s\\S]*?)${endEsc}`, 'i');
+    const completeMatch = text.match(completePattern);
+    
+    if (completeMatch) {
+        const section = (completeMatch[1] || '').trim();
+        const remaining = (text.slice(0, completeMatch.index) + text.slice(completeMatch.index + completeMatch[0].length)).trim();
+        return { section, remaining };
+    }
+    
+    // 2. Strumieniowanie (tylko otwarcie)
+    const startPattern = new RegExp(`${startEsc}([\\s\\S]*)`, 'i');
+    const startMatch = text.match(startPattern);
+    
+    if (startMatch) {
+        const section = (startMatch[1] || '').trim();
+        const remaining = text.slice(0, startMatch.index).trim();
+        return { section, remaining };
+    }
 
-    const section = (match[1] || '').trim();
-    const remaining = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
-    return { section, remaining };
+    return { section: '', remaining: text };
 }
 
 function normalizeLabeledSection(text, header) {
@@ -569,83 +597,48 @@ function parseFullResponse(fullText) {
     let tempText = fullText || '';
     let thoughts = '', stats = '', finalThoughts = '', cleanContent = '';
 
-    const wrappedSections = {
-        thoughts: extractWrappedSection(tempText, '<BEGIN_THOUGHTS>', '</BEGIN_THOUGHTS>'),
-        answer: extractWrappedSection(tempText, '<BEGIN_ANSWER>', '</BEGIN_ANSWER>'),
-        stats: extractWrappedSection(tempText, '<BEGIN_STATS>', '</BEGIN_STATS>'),
-        final: extractWrappedSection(tempText, '<BEGIN_FINAL>', '</BEGIN_FINAL>')
+    // Funkcja pomocnicza: wycina sekcję i aktualizuje tekst
+    const extractAndRemove = (start, end) => {
+        const result = extractWrappedSection(tempText, start, end);
+        if (result.section) {
+            tempText = result.remaining;
+            return result.section;
+        }
+        return null;
     };
 
-    if (wrappedSections.thoughts.section) {
-        thoughts = stripThinkTags(wrappedSections.thoughts.section);
-        tempText = wrappedSections.thoughts.remaining;
+    // 1. THOUGHTS: Sprawdzamy oba warianty tagów.
+    // Najpierw standardowy <BEGIN_THOUGHTS>
+    let th = extractAndRemove('<BEGIN_THOUGHTS>', '</BEGIN_THOUGHTS>');
+    
+    // Jeśli nie znaleziono, szukamy <think>. 
+    // WAŻNE: Robimy to TYLKO jeśli th jest puste, aby nie nadpisać znaleziska.
+    if (!th) {
+        th = extractAndRemove('<think>', '</think>');
     }
-    if (wrappedSections.answer.section) {
-        cleanContent = wrappedSections.answer.section;
-        tempText = wrappedSections.answer.remaining;
-    }
-    if (wrappedSections.stats.section) {
-        stats = wrappedSections.stats.section;
-        tempText = wrappedSections.stats.remaining;
-    }
-    if (wrappedSections.final.section) {
-        finalThoughts = wrappedSections.final.section;
-        tempText = wrappedSections.final.remaining;
+    
+    if (th) thoughts = stripThinkTags(th);
+
+    // 2. STATS
+    const st = extractAndRemove('<BEGIN_STATS>', '</BEGIN_STATS>');
+    if (st) stats = st;
+
+    // 3. FINAL THOUGHTS
+    const fin = extractAndRemove('<BEGIN_FINAL>', '</BEGIN_FINAL>');
+    if (fin) finalThoughts = fin;
+
+    // 4. ANSWER
+    const ans = extractAndRemove('<BEGIN_ANSWER>', '</BEGIN_ANSWER>');
+    if (ans) {
+        cleanContent = ans;
+    } else {
+        // Fallback: To co zostało, jest treścią
+        cleanContent = tempText.trim();
     }
 
-    const thinkOpenMatch = tempText.match(/<think\b[^>]*>/i);
-    if (thinkOpenMatch) {
-        const thinkContentStart = thinkOpenMatch.index + thinkOpenMatch[0].length;
-        const remainderAfterThink = tempText.slice(thinkContentStart);
-        const thinkCloseMatch = remainderAfterThink.match(/<\/think\s*>/i);
-
-        let thinkContentEnd = tempText.length;
-        let removalEnd = tempText.length;
-        if (thinkCloseMatch) {
-            thinkContentEnd = thinkContentStart + thinkCloseMatch.index;
-            removalEnd = thinkContentEnd + thinkCloseMatch[0].length;
-        } else {
-            const fallbackMatch = remainderAfterThink.match(/\*\*\[\[(Stats|Final Thoughts)\]\]\*\*/i);
-            if (fallbackMatch) {
-                thinkContentEnd = thinkContentStart + fallbackMatch.index;
-            }
-            removalEnd = thinkContentEnd;
-        }
-
-        thoughts = tempText.slice(thinkContentStart, thinkContentEnd).trim();
-        tempText = tempText.slice(0, thinkOpenMatch.index) + tempText.slice(removalEnd);
-    }
-
-    if (!thoughts) {
-        const thoughtsBlockMatch = tempText.match(/(\*\*\[\[Thoughts\]\]\*\*[\s\S]*?)(?=\*\*\[\[(Stats|Final Thoughts)\]\]\*\*|$)/i);
-        if (thoughtsBlockMatch) {
-            const rawThoughts = thoughtsBlockMatch[1];
-            thoughts = rawThoughts.replace(/^\*\*\[\[Thoughts\]\]\*\*\s*/i, '').trim();
-            tempText = (tempText.slice(0, thoughtsBlockMatch.index) + tempText.slice(thoughtsBlockMatch.index + rawThoughts.length)).trim();
-        }
-    }
-
-    if (!thoughts) {
-        const { section, remaining } = extractPrefixedSection(tempText, 'thoughts');
-        thoughts = section;
-        tempText = remaining;
-    }
-
-    const finalThoughtsMatch = tempText.match(/(\*\*\[\[Final Thoughts\]\]\*\*[\s\S]*)/i);
-    if (finalThoughtsMatch) {
-        finalThoughts = finalThoughtsMatch[0].trim();
-        tempText = tempText.substring(0, finalThoughtsMatch.index);
-    }
-    const statsMatch = tempText.match(/(\*\*\[\[Stats\]\]\*\*[\s\S]*)/i);
-    if (statsMatch) {
-        stats = statsMatch[0].trim();
-        tempText = tempText.substring(0, statsMatch.index);
-    }
-    cleanContent = tempText.trim();
-
-    thoughts = thoughts || '';
-    stats = normalizeLabeledSection(stats, 'Stats');
-    finalThoughts = normalizeLabeledSection(finalThoughts, 'Final Thoughts');
+    // Normalizacja nagłówków
+    if (stats) stats = normalizeLabeledSection(stats, 'Stats');
+    if (finalThoughts) finalThoughts = normalizeLabeledSection(finalThoughts, 'Final Thoughts');
 
     return { content: cleanContent, thoughts, stats, final_thoughts: finalThoughts };
 }
