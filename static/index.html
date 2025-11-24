@@ -24,7 +24,7 @@
     <div class="panel-section">
       <div class="panel-title panel-toggle">Persona</div>
       <div class="collapsible-content show">
-          <img id="persona-avatar" src="/static/default_avatar.png" style="width:100%; height:auto; aspect-ratio: 1/1; border-radius:12px; object-fit:cover; margin: 0 auto 10px auto; border: 2px solid var(--border);">
+          <img id="persona-avatar" src="/avatars/default.png" style="width:100%; height:auto; aspect-ratio: 1/1; border-radius:12px; object-fit:cover; margin: 0 auto 10px auto; border: 2px solid var(--border);">
           <div style="display:flex; gap: 8px;">
             <select id="side-panel-persona-preset" class="side-panel-input" style="flex:1;"></select>
             <button class="btn" id="side-panel-load-btn">Load</button>
@@ -152,40 +152,87 @@
     <h2>Persona Editor</h2>
     <div class="modal-body">
         <div class="form-group">
-        <label for="persona-prompt">Generate from simple prompt:</label>
-        <div style="display:flex; gap: 10px;">
-            <input type="text" id="persona-prompt" class="modal-input" placeholder="e.g., a brutal ninja from japan that is vicious">
-            <button id="generate-persona-btn" class="btn">Generate</button>
+            <label for="persona-prompt">Generate from simple prompt:</label>
+            <div style="display:flex; gap: 10px;">
+                <input type="text" id="persona-prompt" class="modal-input" placeholder="e.g., a brutal ninja from japan that is vicious">
+                <button id="generate-persona-btn" class="btn">Generate</button>
+            </div>
         </div>
-        </div>
+        
         <div class="form-group">
-        <label for="persona-editor">Persona JSON (edit directly):</label>
-        <textarea id="persona-editor" class="modal-textarea"></textarea>
+            <label for="persona-editor">Persona JSON:</label>
+            <textarea id="persona-editor" class="modal-textarea" style="height: 300px;"></textarea>
+            <small style="color: #666; font-size: 0.8em;">Edit the "avatar" field to change image (e.g. "my_char.png"). Place images in personas/img/ folder.</small>
         </div>
     </div>
     <div class="modal-footer">
-      <div class="btn-group">
-        <select id="saved-personas-list" class="modal-input"></select>
-        <button class="btn" id="load-persona-btn">Load</button>
-      </div>
-      <div class="btn-group">
-        <input type="text" id="save-persona-name" class="modal-input" placeholder="New Persona Name">
-        <button class="btn" id="save-persona-btn">Save</button>
+      <div style="display:flex; flex-direction:column; gap:5px; width:100%;">
+          <div style="display:flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 0.85em; color: var(--text-secondary);">Active Chat:</span>
+              <button class="btn" id="save-current-persona-btn" style="background: var(--success); border-color: var(--success); color: #fff;">Apply to Current Chat</button>
+          </div>
+          
+          <hr style="border: 0; border-top: 1px solid var(--border); width: 100%; margin: 10px 0;">
+          
+          <div style="display:flex; flex-direction: column; gap: 8px;">
+              <span style="font-size: 0.85em; color: var(--text-secondary);">Manage Presets:</span>
+              
+              <div style="display:flex; gap: 10px;">
+                  <select id="saved-personas-list" class="modal-input" style="flex:1;"></select>
+                  <button class="btn" id="load-persona-btn" title="Load selected preset into editor">Load</button>
+                  <button class="btn danger" id="overwrite-persona-btn" title="Save changes to the selected preset file">Overwrite</button>
+              </div>
+
+              <div style="display:flex; gap: 10px; margin-top: 5px;">
+                  <input type="text" id="save-persona-name" class="modal-input" placeholder="New Preset Name" style="flex:1;">
+                  <button class="btn" id="save-persona-btn">Save as New</button>
+              </div>
+          </div>
       </div>
     </div>
   </div>
 </div>
 
 <div id="sys-info-modal" class="modal-backdrop">
-  <div class="modal-content">
+  <div class="modal-content" style="max-width: 800px;">
     <button id="sys-info-modal-close" class="modal-close-btn">&times;</button>
-    <h2>About This Application</h2>
-    <div id="sys-info-content" class="modal-body">
-        <p>This is an advanced, self-hosted AI roleplaying chat server.</p>
-        <p><strong>Version:</strong> <span id="sys-info-version"></span> | <strong>LLM:</strong> <span id="sys-info-model"></span></p>
-        <p><strong>Author:</strong> <a id="sys-info-author-gh" href="https://github.com/wieszjak" target="_blank">WIESZJAK</a></p>
-        <div class="panel-title panel-toggle" id="changelog-toggle">Changelog</div>
-        <div id="changelog-content" class="collapsible-content"></div>
+    <h2 style="border-bottom: 1px solid var(--accent); padding-bottom: 10px; margin-bottom: 15px;">System Architecture & Changelog</h2>
+    
+    <div id="sys-info-content" class="modal-body" style="line-height: 1.6; white-space: normal; padding-right: 15px;">
+        
+        <div style="background: rgba(255,255,255,0.03); padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 3px solid var(--accent);">
+            <h3 style="color: var(--accent); margin-bottom: 10px; margin-top: 0;">AI Narrative Engine v0.9.5</h3>
+            <p style="font-size: 0.95em; color: #ccc; margin-bottom: 10px;">
+                This is not just a chatbot. It is a <strong>high-fidelity, autonomous roleplay orchestration engine</strong> designed for local deployment. 
+                Built on a <strong>RAG (Retrieval-Augmented Generation)</strong> architecture, it utilizes vector embeddings (Faiss/Numpy) to maintain long-term contextual memory and emotional continuity.
+            </p>
+            <ul style="font-size: 0.9em; color: #ccc; margin-top: 10px; padding-left: 20px; margin-bottom: 0;">
+                <li style="margin-bottom: 6px;"><strong>Dynamic State Tracking:</strong> Real-time parsing of internal thoughts, emotional statistics, and narrative reflections.</li>
+                <li style="margin-bottom: 6px;"><strong>Context Reconstruction:</strong> Sophisticated prompt engineering algorithms ("Gaslighting" technique) to prevent model drift and enforce strict template adherence.</li>
+                <li style="margin-bottom: 6px;"><strong>Semantic Memory:</strong> Deep integration of user interactions into a vector space for semantic retrieval of relevant past events.</li>
+                <li><strong>Asynchronous Core:</strong> Built on FastAPI with WebSocket streaming for low-latency, real-time token generation.</li>
+            </ul>
+        </div>
+
+        <div class="panel-title panel-toggle show" id="changelog-toggle">Build Changelog</div>
+        <div id="changelog-content" class="collapsible-content show" style="font-family: monospace; font-size: 0.85rem; color: var(--text-secondary); white-space: pre-wrap; margin-top: 10px;">
+<span style="color: var(--success)">[v0.9.5] - Stability & UI Polish</span>
+- IMPLEMENTED: "Force-Think" Logic to synchronize frontend/backend parsing during streaming.
+- ADDED: Full support for `**[[Response]]**` headers to prevent thought/content bleeding.
+- FIXED: CSS Box Model issues causing "Giant Bubbles" in user interface (aggressive margin reset).
+- OPTIMIZED: JavaScript Regex engine to handle erratic model outputs (missing asterisks, inline lists).
+- ADDED: "New Day" logic with automated summarization and context reset.
+
+<span style="color: var(--accent)">[v0.9.0] - Core Architecture Refactor</span>
+- REFACTORED: Consolidated duplicate logic from `bot.py` into modular `storage.py` and `response_parser.py`.
+- ADDED: Vector Embedding memory system with semantic search.
+- ADDED: Persistent emotional stats tracking.
+        </div>
+        
+        <div style="margin-top: 20px; font-size: 0.8em; text-align: right; color: var(--text-secondary); border-top: 1px solid var(--border); padding-top: 10px;">
+            Powered by <span id="sys-info-model" style="color: #fff;">Unknown</span> | Client Version: <span id="sys-info-version">Unknown</span>
+            <br>Author: <a href="https://github.com/wieszjak" target="_blank" style="color: var(--accent);">WIESZJAK</a>
+        </div>
     </div>
   </div>
 </div>

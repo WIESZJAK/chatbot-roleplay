@@ -80,6 +80,14 @@ const DOM = {
     memoryContent: document.getElementById('memory-content')
 };
 
+function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(this, args), wait);
+    };
+}
+
 // --- Core Utility Functions (defined first to prevent ReferenceError) ---
 function updateStatus(status) {
   DOM.statusText.textContent = status.charAt(0).toUpperCase() + status.slice(1);
@@ -660,24 +668,42 @@ function saveSettings() {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(getSettings()));
 }
 
-function loadSettings() {
-    const savedSettings = localStorage.getItem(SETTINGS_KEY);
-    if (savedSettings) {
-        try {
-            const settings = JSON.parse(savedSettings);
-            if(settings.model) DOM.modelSelect.value = settings.model;
-            if(settings.embedding_model) DOM.embeddingModelSelect.value = settings.embedding_model;
-            DOM.tempSlider.value = settings.temperature || 1.0;
-            DOM.tokensSlider.value = settings.max_tokens || 1024;
-            DOM.thoughtSlider.value = settings.thought_ratio || 0.5;
-            DOM.talkSlider.value = settings.talkativeness || 0.5;
-            DOM.persistentStatsToggle.checked = settings.persistent_stats === true;
-            DOM.enableMemoryToggle.checked = settings.enable_memory !== false;
-            DOM.tempValue.textContent = DOM.tempSlider.value;
-            DOM.tokensValue.textContent = DOM.tokensSlider.value;
-            DOM.thoughtValue.textContent = DOM.thoughtSlider.value;
-            DOM.talkValue.textContent = DOM.talkSlider.value;
-        } catch (e) { console.error("Failed to load settings", e); }
+async function saveSettings() {
+    if (!appState.activeChatId) return;
+    const settings = getSettings(); // Ta funkcja zostaje bez zmian (pobiera z UI)
+    try {
+        // Cichy zapis w tle
+        await api(`/${appState.activeChatId}/settings`, 'POST', settings);
+    } catch (e) {
+        console.error("Failed to save settings:", e);
+    }
+}
+
+async function fetchAndApplySettings(chatId) {
+    try {
+        const settings = await api(`/${chatId}/settings`);
+        
+        // Aplikowanie ustawień do UI
+        if (settings.model) DOM.modelSelect.value = settings.model;
+        if (settings.embedding_model) DOM.embeddingModelSelect.value = settings.embedding_model;
+        
+        DOM.tempSlider.value = settings.temperature;
+        DOM.tempValue.textContent = settings.temperature;
+        
+        DOM.tokensSlider.value = settings.max_tokens;
+        DOM.tokensValue.textContent = settings.max_tokens;
+        
+        DOM.thoughtSlider.value = settings.thought_ratio;
+        DOM.thoughtValue.textContent = settings.thought_ratio;
+        
+        DOM.talkSlider.value = settings.talkativeness;
+        DOM.talkValue.textContent = settings.talkativeness;
+        
+        DOM.persistentStatsToggle.checked = settings.persistent_stats;
+        DOM.enableMemoryToggle.checked = settings.enable_memory;
+        
+    } catch (error) {
+        console.error("Failed to load chat settings:", error);
     }
 }
 
@@ -890,11 +916,19 @@ async function refreshActivePersona() {
     try {
         const persona = await api(`/${appState.activeChatId}/persona`);
         DOM.personaEditor.value = JSON.stringify(persona, null, 2);
-        DOM.personaAvatar.src = `/static/${persona.avatar || 'default_avatar.png'}`;
+        
+        // Obsługa ścieżki avatara
+        // Jeśli avatar to np. "vex.png", dodajemy prefix "/avatars/"
+        // Jeśli już ma http, zostawiamy (na przyszłość)
+        let avatarSrc = persona.avatar || 'default.png';
+        if (!avatarSrc.startsWith('http') && !avatarSrc.startsWith('/')) {
+            avatarSrc = '/avatars/' + avatarSrc;
+        }
+        
+        DOM.personaAvatar.src = avatarSrc;
         return persona;
     } catch (error) {
         console.error('Failed to load active persona:', error);
-        addMessage('system', '[ERROR] Unable to load the active persona.');
         return null;
     }
 }
@@ -1047,102 +1081,156 @@ function closeModal(modal) {
 }
 
 function setupEventListeners() {
+    // 1. Czat: Wysyłanie i zatrzymywanie
     DOM.sendBtn.addEventListener('click', sendMessage);
     DOM.stopBtn.addEventListener('click', stopGeneration);
-
+    
     DOM.chatInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();
             sendMessage();
         }
     });
+    
     DOM.chatInput.addEventListener('input', () => {
         const hasText = DOM.chatInput.value.trim().length > 0;
         DOM.sendBtn.disabled = !hasText || appState.isGenerating;
         autoResizeTextarea(DOM.chatInput);
     });
 
+    // 2. Zarządzanie Czatami (Lewy Panel)
     DOM.addChatBtn.addEventListener('click', async () => {
         const name = DOM.newChatName.value.trim();
-        if (!name) {
-            alert('Please enter a chat name.');
-            return;
-        }
+        if (!name) { alert('Please enter a name for the new chat.'); return; }
         try {
             const res = await api('/chats/create', 'POST', { name });
             DOM.newChatName.value = '';
             await loadChatList();
-            if (res && res.chat_id) {
-                await switchChat(res.chat_id);
-            }
-        } catch (error) {
-            console.error('Failed to create chat:', error);
-            alert('Failed to create chat.');
-        }
+            if (res && res.chat_id) await switchChat(res.chat_id);
+        } catch (error) { alert('Failed to create chat.'); }
     });
 
+    // 3. Przyciski Akcji (Prawy Panel)
     DOM.reloadChatBtn.addEventListener('click', reloadChat);
     DOM.clearMemoryBtn.addEventListener('click', clearMemory);
     DOM.newDayBtn.addEventListener('click', markNewDay);
     DOM.checkSummaryBtn.addEventListener('click', checkSummary);
     DOM.forceSummaryBtn.addEventListener('click', forceSummarize);
-
     DOM.injectEventBtn.addEventListener('click', injectWorldEvent);
-
     DOM.testTextModelBtn.addEventListener('click', testTextModel);
     DOM.testEmbedBtn.addEventListener('click', testEmbeddings);
 
+    // 4. Persona Modal - Otwieranie i Zamykanie
     DOM.openPersonaModalBtn.addEventListener('click', async () => {
         openModal(DOM.personaModal);
         await refreshPersonaLists();
+        // Przy otwarciu załaduj aktualną personę czatu do edytora
+        const currentPersona = await refreshActivePersona();
+        if (currentPersona) {
+            DOM.personaEditor.value = JSON.stringify(currentPersona, null, 2);
+        }
     });
     DOM.personaModalClose.addEventListener('click', () => closeModal(DOM.personaModal));
 
+    // 5. Persona - Ładowanie z Paneli
     DOM.sidePanelLoadBtn.addEventListener('click', () => loadAndActivatePersona(DOM.sidePanelPersonaPreset.value));
+    
+    // Ten przycisk w modalu ładuje preset do edytora i aktywuje go
     DOM.loadPersonaBtn.addEventListener('click', () => loadAndActivatePersona(DOM.savedPersonasList.value));
+
+    // 6. Persona - Generowanie z Promptu
     DOM.generatePersonaBtn.addEventListener('click', generatePersonaFromPrompt);
+
+    // 7. Persona Editor - PRZYCISKI ZAPISU (Pełna logika)
+    
+    // A. Save as New (Zapisz jako nowy plik)
     DOM.savePersonaBtn.addEventListener('click', savePersona);
 
+    // B. Apply to Current Chat (Zastosuj tylko tu i teraz, bez zapisu do pliku)
+    const applyBtn = document.getElementById('save-current-persona-btn');
+    if (applyBtn) {
+        applyBtn.addEventListener('click', async () => {
+            try {
+                const personaData = JSON.parse(DOM.personaEditor.value);
+                await api(`/${appState.activeChatId}/persona`, 'POST', personaData);
+                await refreshActivePersona();
+                alert('Persona updated for this chat session!');
+                closeModal(DOM.personaModal);
+            } catch (e) {
+                alert('Invalid JSON format. Please check your syntax.');
+                console.error(e);
+            }
+        });
+    }
+
+    // C. Overwrite Preset (Nadpisz istniejący plik .json)
+    const overwriteBtn = document.getElementById('overwrite-persona-btn');
+    if (overwriteBtn) {
+        overwriteBtn.addEventListener('click', async () => {
+            const selectedPreset = DOM.savedPersonasList.value;
+            
+            if (!selectedPreset) {
+                alert('Please select a preset from the list to overwrite.');
+                return;
+            }
+
+            if (!confirm(`Are you sure you want to OVERWRITE the preset "${selectedPreset}"? This cannot be undone.`)) {
+                return;
+            }
+
+            try {
+                const personaData = JSON.parse(DOM.personaEditor.value);
+                // Endpoint /personas/{name} obsługuje nadpisywanie
+                await api(`/personas/${encodeURIComponent(selectedPreset)}`, 'POST', personaData);
+                
+                alert(`Preset "${selectedPreset}" updated successfully!`);
+                await refreshPersonaLists();
+                DOM.savedPersonasList.value = selectedPreset; // Przywróć wybór
+                
+            } catch (e) {
+                alert('Error saving preset. Check JSON format or server logs.');
+                console.error(e);
+            }
+        });
+    }
+
+    // 8. System Info & Summary Modals
     DOM.openSysInfoModalBtn.addEventListener('click', async () => {
         openModal(DOM.sysInfoModal);
         try {
             const info = await api('/system_info');
-            const versionEl = document.getElementById('sys-info-version');
-            const modelEl = document.getElementById('sys-info-model');
-            if (versionEl) versionEl.textContent = info.version || 'unknown';
-            if (modelEl) modelEl.textContent = info.model_name || 'unknown';
-        } catch (error) {
-            console.error('Failed to fetch system info:', error);
-        }
+            if (document.getElementById('sys-info-version')) document.getElementById('sys-info-version').textContent = info.version || 'unknown';
+            if (document.getElementById('sys-info-model')) document.getElementById('sys-info-model').textContent = info.model_name || 'unknown';
+        } catch (error) {}
     });
     DOM.sysInfoModalClose.addEventListener('click', () => closeModal(DOM.sysInfoModal));
-
     DOM.summaryModalClose.addEventListener('click', () => closeModal(DOM.summaryModal));
 
+    // 9. Ustawienia (Suwaki i Selecty)
     const settingsControls = [
-        DOM.modelSelect,
-        DOM.embeddingModelSelect,
-        DOM.tempSlider,
-        DOM.tokensSlider,
-        DOM.thoughtSlider,
-        DOM.talkSlider,
-        DOM.persistentStatsToggle,
+        DOM.modelSelect, 
+        DOM.embeddingModelSelect, 
+        DOM.tempSlider, 
+        DOM.tokensSlider, 
+        DOM.thoughtSlider, 
+        DOM.talkSlider, 
+        DOM.persistentStatsToggle, 
         DOM.enableMemoryToggle
     ];
-    const sliderLabels = {
-        [DOM.tempSlider.id]: DOM.tempValue,
-        [DOM.tokensSlider.id]: DOM.tokensValue,
-        [DOM.thoughtSlider.id]: DOM.thoughtValue,
-        [DOM.talkSlider.id]: DOM.talkValue
-    };
+
     settingsControls.forEach(control => {
-        control.addEventListener('input', (event) => {
-            if (event.target.type === 'range' && sliderLabels[event.target.id]) {
-                sliderLabels[event.target.id].textContent = event.target.value;
-            }
+        control.addEventListener('input', () => {
+            // Aktualizacja wyświetlanych wartości suwaków w czasie rzeczywistym
+            if (control === DOM.tempSlider) DOM.tempValue.textContent = control.value;
+            if (control === DOM.tokensSlider) DOM.tokensValue.textContent = control.value;
+            if (control === DOM.thoughtSlider) DOM.thoughtValue.textContent = control.value;
+            if (control === DOM.talkSlider) DOM.talkValue.textContent = control.value;
+            
             saveSettings();
         });
     });
+
+    // Inicjalizacja textarea
     autoResizeTextarea(DOM.chatInput);
     DOM.chatInput.dispatchEvent(new Event('input'));
 }
@@ -1199,18 +1287,23 @@ async function deleteChat(chatId) {
 async function switchChat(chatId) {
     if (!chatId) return;
     if (appState.activeChatId === chatId && appState.ws && appState.ws.readyState === WebSocket.OPEN) return;
+    
     appState.activeChatId = chatId;
     DOM.chatTitle.textContent = `Chat: ${chatId}`;
-    console.log(`Switching to chat: ${appState.activeChatId}`);
+    
+    // UI Update
     document.querySelectorAll('.chat-list-item.active').forEach(el => el.classList.remove('active'));
     document.querySelector(`.chat-list-item[data-chat-id="${chatId}"]`)?.classList.add('active');
+    
     appState.isGenerating = false;
     stopGeneration();
+    
+    // KOLEJNOŚĆ: Najpierw settings, potem reszta
+    await fetchAndApplySettings(chatId); 
+    
     await connectWebSocket();
     await reloadChat();
     await refreshActivePersona();
-    DOM.chatInput.value = '';
-    DOM.chatInput.dispatchEvent(new Event('input'));
 }
 
 async function forceSummarize() {
