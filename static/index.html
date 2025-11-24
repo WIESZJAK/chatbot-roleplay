@@ -61,7 +61,7 @@ body {
 .thought-container {
   font-size: 0.85em; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; font-family: monospace;
   border-bottom: 1px solid var(--border); padding: 10px 12px; margin-bottom: 8px;
-  cursor: pointer; overflow: hidden; max-height: 42px; transition: max-height 0.25s ease-in-out; position: relative;
+  cursor: pointer; transition: max-height 0.25s ease-in-out; position: relative;
   background: var(--bg-secondary);
   scrollbar-width: none;
 }
@@ -72,10 +72,12 @@ body {
 }
 .thought-container .thought-header .chevron { opacity: 0.8; transition: transform 0.2s ease; }
 .thought-container .thought-content {
-  display: none; overflow: hidden; margin-top: 8px; padding-top: 4px;
+  display: block; overflow-y: auto; margin-top: 8px; padding-top: 4px;
+  max-height: 3.1em; /* ~2 lines */
 }
+.thought-container .thought-content::-webkit-scrollbar { display: none; }
 .thought-container.expanded { max-height: none; overflow: visible; }
-.thought-container.expanded .thought-content { display: block; }
+.thought-container.expanded .thought-content { max-height: none; }
 .thought-container.expanded .chevron { transform: rotate(180deg); }
 .stats-container, .final-thoughts-container {
   padding: 8px 0 0 0; margin-top: 8px; border-top: 1px solid var(--border); font-size: 0.85em;
@@ -641,6 +643,15 @@ function updateOrCreateElement(parent, selector, content, position = 'append') {
         const headerEl = element.querySelector('.thought-header');
         if (contentEl && contentEl.innerHTML !== htmlContent) {
             contentEl.innerHTML = htmlContent;
+        }
+
+        if (contentEl) {
+            const autoScroll = !element.classList.contains('expanded');
+            if (autoScroll) {
+                requestAnimationFrame(() => {
+                    contentEl.scrollTop = contentEl.scrollHeight;
+                });
+            }
         }
 
         const setExpanded = (expanded) => {
