@@ -815,6 +815,14 @@ function handleWebSocketMessage(data) {
             appState.isGenerating = false;
             updateStatus('connected');
             appState.awaitingAssistantTimestamp = true;
+            // Some providers return the final chunk only in the "done" event.
+            if (typeof data.chunk === 'string' && data.chunk.trim()) {
+                appState.fullResponseText += data.chunk;
+            }
+            // Ensure we always have a container to render into even if the stream never initialized.
+            if (!appState.currentMessageContainer) {
+                appState.currentMessageContainer = addMessage('assistant');
+            }
             if (appState.currentMessageContainer && appState.fullResponseText) {
                 // Final render to clean up any streaming artifacts
                 renderMessage(appState.currentMessageContainer, parseFullResponse(appState.fullResponseText));
