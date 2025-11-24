@@ -140,6 +140,15 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 def now_iso():
     return datetime.utcnow().isoformat() + "Z"
 
+def _normalize_labeled_block(text: str, header: str) -> str:
+    if not text:
+        return ""
+    header_token = f"**[[{header}]]**"
+    if header_token.lower() not in text.lower():
+        return header_token + "\n" + text.strip()
+    return text.strip()
+
+
 def parse_full_response(full_response: str) -> Dict[str, str]:
     response_data = {"thoughts": "", "content": "", "stats": "", "final_thoughts": ""}
     remaining_text = full_response
@@ -155,7 +164,12 @@ def parse_full_response(full_response: str) -> Dict[str, str]:
     if stats_match:
         response_data["stats"] = stats_match.group(0).strip()
         remaining_text = remaining_text[:stats_match.start()]
+
     response_data["content"] = remaining_text.strip()
+    if full_response.strip() and not response_data["thoughts"]:
+        response_data["thoughts"] = "No explicit thinking was provided. Summarize your reasoning here next time."
+    response_data["stats"] = _normalize_labeled_block(response_data["stats"], "Stats")
+    response_data["final_thoughts"] = _normalize_labeled_block(response_data["final_thoughts"], "Final Thoughts")
     return response_data
 
 def append_message_to_disk(chat_id: str, role: str, content: str, ts: Optional[str] = None, meta: Optional[Dict[str,Any]] = None, thoughts: Optional[str] = None, stats: Optional[str] = None, final_thoughts: Optional[str] = None):
@@ -616,6 +630,14 @@ def build_prompt_context(chat_id: str, user_msg: str, settings: Dict[str, Any]) 
         days_passed = int(days_passed_match.group(1)) if days_passed_match else 0
         greeting_instruction = (f"A new day has begun ({days_passed} days passed). Start with a morning greeting.") if days_passed > 0 else "This is a new session on the same day. Start with a greeting as if returning after a short break."
         system_parts.append(f"**CRITICAL CONTEXT: A NEW DAY/SESSION HAS BEGUN!**\n- **Instructions:** {greeting_instruction}\n- After the greeting, respond to the user's message as usual.\n")
+
+    last_assistant_msg = next((m.get("content", "") for m in reversed(recent_messages) if m.get("role") == "assistant" and m.get("content")), "")
+    if last_assistant_msg:
+        preview = (last_assistant_msg[:300] + "...") if len(last_assistant_msg) > 300 else last_assistant_msg
+        system_parts.append(
+            "Avoid repeating or paraphrasing your last reply. Offer new details, emotions, or angles compared to this prior response: "
+            + preview
+        )
 
     output_instructions = persona.get("output_instructions", DEFAULT_PERSONA["output_instructions"])
     if isinstance(output_instructions, list):
@@ -1143,6 +1165,16 @@ function simpleMarkdown(text) {
         .replace(/\*(.*?)\*/g, '<em>$1</em>');
 }
 
+function normalizeLabeledSection(text, header) {
+    if (!text) return '';
+    const trimmed = text.trim();
+    const headerToken = `**[[${header}]]**`;
+    if (!trimmed.toLowerCase().includes(headerToken.toLowerCase())) {
+        return `${headerToken}\n${trimmed}`;
+    }
+    return trimmed;
+}
+
 function parseFullResponse(fullText) {
     let tempText = fullText;
     let thoughts = '', stats = '', finalThoughts = '', cleanContent = '';
@@ -1162,6 +1194,11 @@ function parseFullResponse(fullText) {
         tempText = tempText.substring(0, statsMatch.index);
     }
     cleanContent = tempText.trim();
+
+    thoughts = thoughts || (fullText.trim() ? 'No explicit thinking was provided. Summarize your reasoning here next time.' : '');
+    stats = normalizeLabeledSection(stats, 'Stats');
+    finalThoughts = normalizeLabeledSection(finalThoughts, 'Final Thoughts');
+
     return { content: cleanContent, thoughts, stats, final_thoughts: finalThoughts };
 }
 
@@ -1369,7 +1406,7 @@ function addMessageFooter(msgWrapper, role) {
 async function deleteMessage(ts, element) {
   if (!ts) return;
   if (confirm('Delete this message?')) {
-    await api(`/${appState.activeChatId}/edit_message`, 'POST', {ts});
+    await api(`/${appState.activeChatId}/delete_message`, 'POST', { ts });
     element.remove();
   }
 }
