@@ -758,17 +758,23 @@ body {
 }
 .thought-container {
   font-size: 0.85em; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; font-family: monospace;
-  border-bottom: 1px solid var(--border); padding: 8px 0 12px 0; margin-bottom: 8px;
-  cursor: pointer; overflow: hidden; max-height: 70px; transition: max-height 0.3s ease-in-out; position: relative;
+  border-bottom: 1px solid var(--border); padding: 10px 12px; margin-bottom: 8px;
+  cursor: pointer; overflow: hidden; max-height: 42px; transition: max-height 0.25s ease-in-out; position: relative;
+  background: var(--bg-secondary);
+  scrollbar-width: none;
 }
-.thought-container .thought-content { overflow: hidden; height: 100%; }
-.thought-container::before {
-  content: 'Thoughts ▼'; font-weight: bold; display: block; margin-bottom: 8px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  color: #fff; position: sticky; top: 0; background: var(--bg-secondary);
+.thought-container::-webkit-scrollbar { display: none; }
+.thought-container .thought-header {
+  display: flex; align-items: center; gap: 8px; font-weight: 600; letter-spacing: 0.02em;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; color: #fff;
 }
-.thought-container.expanded { max-height: 1000px; overflow-y: auto; }
-.thought-container.expanded::before { content: 'Thoughts ▲'; }
+.thought-container .thought-header .chevron { opacity: 0.8; transition: transform 0.2s ease; }
+.thought-container .thought-content {
+  display: none; overflow: hidden; margin-top: 8px; padding-top: 4px;
+}
+.thought-container.expanded { max-height: none; overflow: visible; }
+.thought-container.expanded .thought-content { display: block; }
+.thought-container.expanded .chevron { transform: rotate(180deg); }
 .stats-container, .final-thoughts-container {
   padding: 8px 0 0 0; margin-top: 8px; border-top: 1px solid var(--border); font-size: 0.85em;
 }
@@ -1264,17 +1270,39 @@ function updateOrCreateElement(parent, selector, content, position = 'append') {
         if (position === 'prepend') parent.prepend(element);
         else parent.appendChild(element);
     }
-    
+
     element.style.display = 'block';
     const htmlContent = simpleMarkdown(content).replace(/\n/g, '<br>');
 
     if (selector === '.thought-container') {
-        const thoughtContentHTML = `<div class="thought-content">${htmlContent}</div>`;
-        if (element.innerHTML !== thoughtContentHTML) {
-            element.innerHTML = thoughtContentHTML;
+        const wasExpanded = element.classList.contains('expanded');
+        if (!element.innerHTML.trim()) {
+            element.innerHTML = `
+                <div class="thought-header" role="button" aria-expanded="false">
+                    <span class="chevron">▼</span>
+                    <span>Thoughts</span>
+                </div>
+                <div class="thought-content"></div>`;
         }
-        if (!element.hasToggleListener) {
-            element.addEventListener('click', () => element.classList.toggle('expanded'));
+
+        const contentEl = element.querySelector('.thought-content');
+        const headerEl = element.querySelector('.thought-header');
+        if (contentEl && contentEl.innerHTML !== htmlContent) {
+            contentEl.innerHTML = htmlContent;
+        }
+
+        const setExpanded = (expanded) => {
+            element.classList.toggle('expanded', expanded);
+            if (headerEl) headerEl.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        };
+        setExpanded(wasExpanded);
+
+        if (!element.hasToggleListener && headerEl) {
+            headerEl.addEventListener('click', (event) => {
+                event.stopPropagation();
+                const nextState = !element.classList.contains('expanded');
+                setExpanded(nextState);
+            });
             element.hasToggleListener = true;
         }
     } else {
