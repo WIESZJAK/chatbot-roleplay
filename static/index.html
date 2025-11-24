@@ -658,13 +658,19 @@ function normalizeMessageDataForRender(msgData = {}) {
         final_thoughts: msgData.final_thoughts || msgData.finalThoughts || ''
     };
 
-    const hasInlineStructuredBlocks = /<think\b[^>]*>|\*\*\[\[Thoughts\]\]\*\*/i.test(normalized.content);
+    // POPRAWKA: Rozszerzona detekcja znaczników. 
+    // Teraz sprawdzamy też Stats, Final Thoughts oraz tagi XML <BEGIN_...>.
+    const structureRegex = /<think\b[^>]*>|\*\*\[\[Thoughts\]\]\*\*|\*\*\[\[Stats\]\]\*\*|\*\*\[\[Final Thoughts\]\]\*\*|<BEGIN_[A-Z]+>/i;
+    
+    const hasInlineStructuredBlocks = structureRegex.test(normalized.content);
+
     if (hasInlineStructuredBlocks) {
         const parsed = parseFullResponse(normalized.content);
+        // Jeśli parser coś wyciągnął, aktualizujemy pola, ale nie nadpisujemy istniejących, jeśli są puste w wyniku parsowania
         normalized.content = parsed.content || normalized.content;
-        normalized.thoughts = normalized.thoughts || parsed.thoughts;
-        normalized.stats = normalized.stats || parsed.stats;
-        normalized.final_thoughts = normalized.final_thoughts || parsed.final_thoughts;
+        if(parsed.thoughts) normalized.thoughts = parsed.thoughts;
+        if(parsed.stats) normalized.stats = parsed.stats;
+        if(parsed.final_thoughts) normalized.final_thoughts = parsed.final_thoughts;
     }
 
     normalized.stats = normalizeLabeledSection(normalized.stats, 'Stats');
@@ -815,22 +821,29 @@ function handleWebSocketMessage(data) {
             appState.isGenerating = false;
             updateStatus('connected');
             appState.awaitingAssistantTimestamp = true;
-            // Some providers return the final chunk only in the "done" event.
+            // Niektóre dostawcy zwracają końcowy fragment tylko w zdarzeniu "done"
             if (typeof data.chunk === 'string' && data.chunk.trim()) {
                 appState.fullResponseText += data.chunk;
             }
-            // Ensure we always have a container to render into even if the stream never initialized.
+            // Zapewnienie, że zawsze mamy kontener, nawet jeśli strumień nigdy nie wystartował
             if (!appState.currentMessageContainer) {
                 appState.currentMessageContainer = addMessage('assistant');
             }
+            
+            // UWAGA: Pełne renderowanie jest teraz celowo przesunięte do 'assistant_ts' 
+            // w celu zsynchronizowania z zapisem na dysku.
+            
+            // Użyj pełnego tekstu odpowiedzi, który został zgromadzony podczas strumieniowania.
             if (appState.currentMessageContainer && appState.fullResponseText) {
-                // Final render to clean up any streaming artifacts
+                // Renderujemy to, co mamy, jeśli strumień się zatrzymał.
                 renderMessage(appState.currentMessageContainer, parseFullResponse(appState.fullResponseText));
             }
-            appState.fullResponseText = '';
+
             if (data.type === 'stopped') {
+                // Jeśli strumień został zatrzymany ręcznie, renderujemy to, co mamy, i czyścimy stan.
                 appState.awaitingAssistantTimestamp = false;
                 appState.currentMessageContainer = null;
+                appState.fullResponseText = ''; 
             }
             break;
         case 'error':
@@ -849,15 +862,21 @@ function handleWebSocketMessage(data) {
             if (appState.currentMessageContainer) {
                 appState.currentMessageContainer.dataset.ts = data.ts;
                 addMessageFooter(appState.currentMessageContainer, 'assistant');
+                
+                // POPRAWKA: Pobieramy pewną, zapisaną wersję wiadomości z serwera
+                fetch(`/${appState.activeChatId}/messages`)
+                    .then(r => r.json())
+                    .then(msgs => {
+                        const saved = msgs.find(m => m.ts === data.ts);
+                        if (saved) renderMessage(appState.currentMessageContainer, saved);
+                        else renderMessage(appState.currentMessageContainer, parseFullResponse(appState.fullResponseText));
+                    })
+                    .catch(() => renderMessage(appState.currentMessageContainer, parseFullResponse(appState.fullResponseText)));
+                
+                appState.awaitingAssistantTimestamp = false;
+                appState.currentMessageContainer = null;
+                appState.fullResponseText = '';
             }
-            appState.awaitingAssistantTimestamp = false;
-            appState.currentMessageContainer = null;
-            break;
-        case 'memory_info':
-            let memoryHtml = data.content.replace('Relevant memories:', '').trim();
-            memoryHtml = renderMarkdown(memoryHtml);
-            DOM.memoryContent.innerHTML = memoryHtml;
-            DOM.memoryPanel.style.display = 'flex';
             break;
     }
 }
