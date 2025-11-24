@@ -176,6 +176,18 @@ def parse_full_response(full_response: str) -> Dict[str, str]:
         response_data["thoughts"] = remaining_text[think_content_start:think_content_end].strip()
         remaining_text = remaining_text[:think_start] + remaining_text[removal_end:]
 
+    # Fallback: capture a **[[Thoughts]]** block if <think> tags are missing
+    if not response_data["thoughts"]:
+        thoughts_match = re.search(
+            r"(\*\*\[\[Thoughts\]\]\*\*[\s\S]*?)(?=\*\*\[\[(Stats|Final Thoughts)\]\]\*\*|$)",
+            remaining_text,
+            re.IGNORECASE,
+        )
+        if thoughts_match:
+            raw_thoughts = thoughts_match.group(1)
+            response_data["thoughts"] = re.sub(r"^\*\*\[\[Thoughts\]\]\*\*\s*", "", raw_thoughts, flags=re.IGNORECASE).strip()
+            remaining_text = (remaining_text[: thoughts_match.start()] + remaining_text[thoughts_match.end() :]).strip()
+
     final_thoughts_match = re.search(r'(\*\*\[\[Final Thoughts\]\]\*\*[\s\S]*)', remaining_text, re.IGNORECASE)
     if final_thoughts_match:
         response_data["final_thoughts"] = final_thoughts_match.group(0).strip()
@@ -1235,6 +1247,15 @@ function parseFullResponse(fullText) {
 
         thoughts = tempText.slice(thinkContentStart, thinkContentEnd).trim();
         tempText = tempText.slice(0, thinkOpenMatch.index) + tempText.slice(removalEnd);
+    }
+
+    if (!thoughts) {
+        const thoughtsBlockMatch = tempText.match(/(\*\*\[\[Thoughts\]\]\*\*[\s\S]*?)(?=\*\*\[\[(Stats|Final Thoughts)\]\]\*\*|$)/i);
+        if (thoughtsBlockMatch) {
+            const rawThoughts = thoughtsBlockMatch[1];
+            thoughts = rawThoughts.replace(/^\*\*\[\[Thoughts\]\]\*\*\s*/i, '').trim();
+            tempText = (tempText.slice(0, thoughtsBlockMatch.index) + tempText.slice(thoughtsBlockMatch.index + rawThoughts.length)).trim();
+        }
     }
 
     const finalThoughtsMatch = tempText.match(/(\*\*\[\[Final Thoughts\]\]\*\*[\s\S]*)/i);
