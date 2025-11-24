@@ -126,11 +126,11 @@ DEFAULT_PERSONA = {
     ),
     "output_instructions": (
         "You must follow this structure for every response. Each section must have its marker.\n"
-        "1.  Start with your thoughts in <think>...</think> tags.\n"
-        "2.  Write your main response to the user.\n"
-        "3.  Add the **[[Stats]]** section. Use single newlines between stats.\n"
-        "4.  End with the **[[Final Thoughts]]** section.\n"
-        "The order is always: <think> -> response -> **[[Stats]]** -> **[[Final Thoughts]]**. Do not forget any marker."
+        "1.  Wrap your chain-of-thought in both <think>...</think> and <BEGIN_THOUGHTS>...</BEGIN_THOUGHTS> tags.\n"
+        "2.  Wrap your main reply to the user inside <BEGIN_ANSWER>...</BEGIN_ANSWER>.\n"
+        "3.  Add the **[[Stats]]** section, also wrapped in <BEGIN_STATS>...</BEGIN_STATS>. Use single newlines between stats.\n"
+        "4.  End with the **[[Final Thoughts]]** section, wrapped in <BEGIN_FINAL>...</BEGIN_FINAL>.\n"
+        "The order is always: THOUGHTS -> ANSWER -> STATS -> FINAL THOUGHTS. Do not forget any marker."
     ),
     "censor_list": [],
     "prompt_examples": []
@@ -174,9 +174,41 @@ def _extract_prefixed_section(text: str, label: str) -> (str, str):
     return section_body, remaining
 
 
+def _extract_wrapped_section(text: str, start_tag: str, end_tag: str) -> (str, str):
+    if not text:
+        return "", text
+
+    pattern = re.compile(rf"{re.escape(start_tag)}(.*?){re.escape(end_tag)}", re.IGNORECASE | re.DOTALL)
+    match = pattern.search(text)
+    if not match:
+        return "", text
+
+    section_body = match.group(1).strip()
+    remaining = (text[: match.start()] + text[match.end() :]).strip()
+    return section_body, remaining
+
+
+def _strip_think_tags(text: str) -> str:
+    return re.sub(r"^<think\b[^>]*>\s*", "", re.sub(r"\s*</think\s*>$", "", text or "", flags=re.IGNORECASE), flags=re.IGNORECASE).strip()
+
+
 def parse_full_response(full_response: str) -> Dict[str, str]:
     response_data = {"thoughts": "", "content": "", "stats": "", "final_thoughts": ""}
-    remaining_text = full_response
+    remaining_text = full_response or ""
+
+    wrapped_thoughts, remaining_text = _extract_wrapped_section(remaining_text, "<BEGIN_THOUGHTS>", "</BEGIN_THOUGHTS>")
+    wrapped_answer, remaining_text = _extract_wrapped_section(remaining_text, "<BEGIN_ANSWER>", "</BEGIN_ANSWER>")
+    wrapped_stats, remaining_text = _extract_wrapped_section(remaining_text, "<BEGIN_STATS>", "</BEGIN_STATS>")
+    wrapped_final, remaining_text = _extract_wrapped_section(remaining_text, "<BEGIN_FINAL>", "</BEGIN_FINAL>")
+
+    if wrapped_thoughts:
+        response_data["thoughts"] = _strip_think_tags(wrapped_thoughts)
+    if wrapped_answer:
+        response_data["content"] = wrapped_answer
+    if wrapped_stats:
+        response_data["stats"] = wrapped_stats
+    if wrapped_final:
+        response_data["final_thoughts"] = wrapped_final
 
     think_open_match = re.search(r"<think\b[^>]*>", remaining_text, re.IGNORECASE)
     if think_open_match:
@@ -198,10 +230,11 @@ def parse_full_response(full_response: str) -> Dict[str, str]:
             think_content_end = fallback_end
             removal_end = think_content_end
 
-        response_data["thoughts"] = remaining_text[think_content_start:think_content_end].strip()
+        inline_thoughts = remaining_text[think_content_start:think_content_end].strip()
         remaining_text = remaining_text[:think_start] + remaining_text[removal_end:]
+        if not response_data["thoughts"]:
+            response_data["thoughts"] = inline_thoughts
 
-    # Fallback: capture a **[[Thoughts]]** block if <think> tags are missing
     if not response_data["thoughts"]:
         thoughts_match = re.search(
             r"(\*\*\[\[Thoughts\]\]\*\*[\s\S]*?)(?=\*\*\[\[(Stats|Final Thoughts)\]\]\*\*|$)",
@@ -213,23 +246,25 @@ def parse_full_response(full_response: str) -> Dict[str, str]:
             response_data["thoughts"] = re.sub(r"^\*\*\[\[Thoughts\]\]\*\*\s*", "", raw_thoughts, flags=re.IGNORECASE).strip()
             remaining_text = (remaining_text[: thoughts_match.start()] + remaining_text[thoughts_match.end() :]).strip()
 
-    # Final fallback: pull out an inline "Thoughts: " prefix if present
     if not response_data["thoughts"]:
         extracted_thoughts, remaining_text = _extract_prefixed_section(remaining_text, "thoughts")
         response_data["thoughts"] = extracted_thoughts
 
     final_thoughts_match = re.search(r'(\*\*\[\[Final Thoughts\]\]\*\*[\s\S]*)', remaining_text, re.IGNORECASE)
-    if final_thoughts_match:
+    if final_thoughts_match and not response_data["final_thoughts"]:
         response_data["final_thoughts"] = final_thoughts_match.group(0).strip()
         remaining_text = remaining_text[:final_thoughts_match.start()]
     stats_match = re.search(r'(\*\*\[\[Stats\]\]\*\*[\s\S]*)', remaining_text, re.IGNORECASE)
-    if stats_match:
+    if stats_match and not response_data["stats"]:
         response_data["stats"] = stats_match.group(0).strip()
         remaining_text = remaining_text[:stats_match.start()]
 
-    response_data["content"] = remaining_text.strip()
-    if not response_data["thoughts"]:
-        response_data["thoughts"] = ""
+    if not response_data["content"] and response_data["thoughts"] and remaining_text:
+        response_data["content"] = remaining_text.strip()
+    elif not response_data["content"]:
+        response_data["content"] = remaining_text.strip()
+
+    response_data["thoughts"] = _strip_think_tags(response_data["thoughts"])
     response_data["stats"] = _normalize_labeled_block(response_data["stats"], "Stats")
     response_data["final_thoughts"] = _normalize_labeled_block(response_data["final_thoughts"], "Final Thoughts")
     return response_data
@@ -686,6 +721,9 @@ def build_prompt_context(chat_id: str, user_msg: str, settings: Dict[str, Any]) 
 
     system_parts.append(
         "Stay strictly in the first person. Describe any small actions inline using *action* markup within your dialogue, and avoid third-person narration or stage directions."
+    )
+    system_parts.append(
+        "You must respond to the most recent user message only. Earlier turns are context/memory, not prompts to answer directly."
     )
 
     recent_messages = read_last_messages(chat_id, 5)
