@@ -149,6 +149,28 @@ def _normalize_labeled_block(text: str, header: str) -> str:
     return text.strip()
 
 
+def _extract_prefixed_section(text: str, label: str) -> (str, str):
+    """Extract a section that begins with ``label:`` and return ``(body, remaining)``.
+
+    This is a safety net for model outputs that forget the required markers but still
+    prefix their thoughts or other sections with an explicit label. The function pulls
+    the labeled paragraph out of ``text`` so that it can be rendered in the correct
+    UI container instead of leaking into the main answer.
+    """
+
+    if not text:
+        return "", text
+
+    pattern = rf"^\s*{re.escape(label)}\s*:\s*(.+?)(?:\n{{2,}}|\r?\n\r?\n|$)"
+    match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return "", text
+
+    section_body = match.group(1).strip()
+    remaining = (text[: match.start()] + text[match.end() :]).strip()
+    return section_body, remaining
+
+
 def parse_full_response(full_response: str) -> Dict[str, str]:
     response_data = {"thoughts": "", "content": "", "stats": "", "final_thoughts": ""}
     remaining_text = full_response
@@ -187,6 +209,11 @@ def parse_full_response(full_response: str) -> Dict[str, str]:
             raw_thoughts = thoughts_match.group(1)
             response_data["thoughts"] = re.sub(r"^\*\*\[\[Thoughts\]\]\*\*\s*", "", raw_thoughts, flags=re.IGNORECASE).strip()
             remaining_text = (remaining_text[: thoughts_match.start()] + remaining_text[thoughts_match.end() :]).strip()
+
+    # Final fallback: pull out an inline "Thoughts: " prefix if present
+    if not response_data["thoughts"]:
+        extracted_thoughts, remaining_text = _extract_prefixed_section(remaining_text, "thoughts")
+        response_data["thoughts"] = extracted_thoughts
 
     final_thoughts_match = re.search(r'(\*\*\[\[Final Thoughts\]\]\*\*[\s\S]*)', remaining_text, re.IGNORECASE)
     if final_thoughts_match:
@@ -1222,6 +1249,18 @@ function normalizeLabeledSection(text, header) {
     return trimmed;
 }
 
+function extractPrefixedSection(text, label) {
+    if (!text) return { section: '', remaining: text };
+
+    const pattern = new RegExp(`^\\s*${label}\\s*:\\s*(.+?)(?:\\n{2,}|\\r?\\n\\r?\\n|$)`, 'is');
+    const match = text.match(pattern);
+    if (!match) return { section: '', remaining: text };
+
+    const section = (match[1] || '').trim();
+    const remaining = (text.slice(0, match.index) + text.slice(match.index + match[0].length)).trim();
+    return { section, remaining };
+}
+
 function parseFullResponse(fullText) {
     let tempText = fullText;
     let thoughts = '', stats = '', finalThoughts = '', cleanContent = '';
@@ -1256,6 +1295,12 @@ function parseFullResponse(fullText) {
             thoughts = rawThoughts.replace(/^\*\*\[\[Thoughts\]\]\*\*\s*/i, '').trim();
             tempText = (tempText.slice(0, thoughtsBlockMatch.index) + tempText.slice(thoughtsBlockMatch.index + rawThoughts.length)).trim();
         }
+    }
+
+    if (!thoughts) {
+        const { section, remaining } = extractPrefixedSection(tempText, 'thoughts');
+        thoughts = section;
+        tempText = remaining;
     }
 
     const finalThoughtsMatch = tempText.match(/(\*\*\[\[Final Thoughts\]\]\*\*[\s\S]*)/i);
