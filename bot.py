@@ -196,40 +196,6 @@ def _strip_think_tags(text: str) -> str:
     return re.sub(r"^<think\b[^>]*>\s*", "", re.sub(r"\s*</think\s*>$", "", text or "", flags=re.IGNORECASE), flags=re.IGNORECASE).strip()
 
 
-def parse_full_response(full_response: str) -> Dict[str, str]:
-    response_data = {"thoughts": "", "content": "", "stats": "", "final_thoughts": ""}
-    text = full_response or ""
-
-    # 1. Myśli (obsługa standardowa)
-    think_match = re.search(r"<think\b[^>]*>(.*?)</think\s*>", text, re.IGNORECASE | re.DOTALL)
-    if think_match:
-        response_data["thoughts"] = think_match.group(1).strip()
-        text = text.replace(think_match.group(0), "")
-    
-    # 2. Final Thoughts (szukamy od dołu)
-    # Regex łapie: **[[Final Thoughts]]** ORAZ [[Final Thoughts]] (bez gwiazdek)
-    ft_match = re.search(r"(\*\*\[\[Final Thoughts\]\]\*\*|\[\[Final Thoughts\]\])([\s\S]*)$", text, re.IGNORECASE)
-    if ft_match:
-        response_data["final_thoughts"] = ft_match.group(2).strip()
-        text = text[:ft_match.start()].strip()
-
-    # 3. Stats (szukamy od dołu w tym co zostało)
-    st_match = re.search(r"(\*\*\[\[Stats\]\]\*\*|\[\[Stats\]\])([\s\S]*)$", text, re.IGNORECASE)
-    if st_match:
-        response_data["stats"] = st_match.group(2).strip()
-        text = text[:st_match.start()].strip()
-
-    # 4. Reszta to content
-    response_data["content"] = text.strip()
-
-    # Normalizacja dla spójności
-    if response_data["stats"]:
-        response_data["stats"] = _normalize_labeled_block(response_data["stats"], "Stats")
-    if response_data["final_thoughts"]:
-        response_data["final_thoughts"] = _normalize_labeled_block(response_data["final_thoughts"], "Final Thoughts")
-        
-    return response_data
-
 def append_message_to_disk(chat_id: str, role: str, content: str, ts: Optional[str] = None, meta: Optional[Dict[str,Any]] = None, thoughts: Optional[str] = None, stats: Optional[str] = None, final_thoughts: Optional[str] = None):
     rec = {"ts": ts or now_iso(), "role": role, "content": content}
     if meta: rec["meta"] = meta

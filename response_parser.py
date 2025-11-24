@@ -30,64 +30,47 @@ def _extract_prefixed_section(text: str, label: str) -> Tuple[str, str]:
 
 
 def parse_full_response(full_response: str) -> Dict[str, str]:
-    """Parse a structured assistant response into its individual sections."""
-    response_data = {key: "" for key in _SECTION_KEYS}
-    if not isinstance(full_response, str):
-        return response_data
+    # Upewnij się, że funkcja _normalize_labeled_block jest zdefiniowana w tym pliku
+    # lub jest poprawnie importowana, jeśli jej używasz. 
+    # W nowej wersji z niej rezygnujemy, aby dane w JSON były czyste.
 
-    remaining_text = full_response
+    response_data = {"thoughts": "", "content": "", "stats": "", "final_thoughts": ""}
+    
+    # Usuwamy ewentualne śmieciowe tagi XML, jeśli model je generuje
+    text = full_response or ""
+    text = re.sub(r"</?END_ANSWER>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"</?END_FINAL>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"</?BEGIN_ANSWER>", "", text, flags=re.IGNORECASE)
+    
+    # 1. Wyciągnij myśli <think>
+    think_match = re.search(r"<think\b[^>]*>(.*?)</think\s*>", text, re.IGNORECASE | re.DOTALL)
+    if think_match:
+        response_data["thoughts"] = think_match.group(1).strip()
+        text = text.replace(think_match.group(0), "")
+    
+    # 2. Wyciągnij Final Thoughts i WYCZYŚĆ nagłówek
+    # Szukamy nagłówka (z gwiazdkami lub bez) i łapiemy całą resztę
+    ft_match = re.search(r"(\*\*\[\[Final Thoughts\]\]\*\*|\[\[Final Thoughts\]\])([\s\S]*)$", text, re.IGNORECASE)
+    if ft_match:
+        # Treść sekcji (z nagłówkiem)
+        raw_ft = ft_match.group(0).strip() 
+        # Usuwamy tylko nagłówek, zostawiając treść
+        cleaned_ft = re.sub(r"^(\*\*\[\[Final Thoughts\]\]\*\*|\[\[Final Thoughts\]\])", "", raw_ft, flags=re.IGNORECASE).strip()
+        response_data["final_thoughts"] = cleaned_ft
+        text = text[:ft_match.start()].strip() # Skracamy główny tekst
 
-    think_open_match = re.search(r"<think\\b[^>]*>", remaining_text, re.IGNORECASE)
-    if think_open_match:
-        think_start = think_open_match.start()
-        think_content_start = think_open_match.end()
-        think_close_match = re.search(r"</think\\s*>", remaining_text[think_content_start:], re.IGNORECASE)
+    # 3. Wyciągnij Stats i WYCZYŚĆ nagłówek
+    st_match = re.search(r"(\*\*\[\[Stats\]\]\*\*|\[\[Stats\]\])([\s\S]*)$", text, re.IGNORECASE)
+    if st_match:
+        raw_st = st_match.group(0).strip()
+        # Usuwamy tylko nagłówek, zostawiając treść
+        cleaned_st = re.sub(r"^(\*\*\[\[Stats\]\]\*\*|\[\[Stats\]\])", "", raw_st, flags=re.IGNORECASE).strip()
+        response_data["stats"] = cleaned_st
+        text = text[:st_match.start()].strip() # Skracamy główny tekst
 
-        if think_close_match:
-            think_content_end = think_content_start + think_close_match.start()
-            removal_end = think_content_end + len(think_close_match.group(0))
-        else:
-            remainder_after_think = remaining_text[think_content_start:]
-            fallback_end = len(remaining_text)
-            for pattern in (r"\*\*\[\[Stats\]\]\*\*", r"\*\*\[\[Final Thoughts\]\]\*\*"):
-                marker_match = re.search(pattern, remainder_after_think, re.IGNORECASE)
-                if marker_match:
-                    fallback_end = think_content_start + marker_match.start()
-                    break
-            think_content_end = fallback_end
-            removal_end = think_content_end
-
-        response_data["thoughts"] = remaining_text[think_content_start:think_content_end].strip()
-        remaining_text = remaining_text[:think_start] + remaining_text[removal_end:]
-
-    if not response_data["thoughts"]:
-        thoughts_match = re.search(
-            r"(\*\*\[\[Thoughts\]\]\*\*[\s\S]*?)(?=\*\*\[\[(Stats|Final Thoughts)\]\]\*\*|$)",
-            remaining_text,
-            re.IGNORECASE,
-        )
-        if thoughts_match:
-            raw_thoughts = thoughts_match.group(1)
-            response_data["thoughts"] = re.sub(
-                r"^\*\*\[\[Thoughts\]\]\*\*\s*", "", raw_thoughts, flags=re.IGNORECASE
-            ).strip()
-            remaining_text = (remaining_text[: thoughts_match.start()] + remaining_text[thoughts_match.end() :]).strip()
-
-    if not response_data["thoughts"]:
-        extracted_thoughts, remaining_text = _extract_prefixed_section(remaining_text, "thoughts")
-        response_data["thoughts"] = extracted_thoughts
-
-    final_thoughts_match = re.search(r"(\*\*\[\[Final Thoughts\]\]\*\*[\s\S]*)", remaining_text, re.IGNORECASE)
-    if final_thoughts_match:
-        response_data["final_thoughts"] = final_thoughts_match.group(0).strip()
-        remaining_text = remaining_text[: final_thoughts_match.start()]
-
-    stats_match = re.search(r"(\*\*\[\[Stats\]\]\*\*[\s\S]*)", remaining_text, re.IGNORECASE)
-    if stats_match:
-        response_data["stats"] = stats_match.group(0).strip()
-        remaining_text = remaining_text[: stats_match.start()]
-
-    response_data["content"] = remaining_text.strip()
+    # 4. Reszta to content
+    response_data["content"] = text.strip()
+        
     return response_data
 
 
