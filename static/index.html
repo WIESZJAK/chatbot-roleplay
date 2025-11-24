@@ -75,23 +75,24 @@ body {
 .message-body p { margin: 0 0 6px 0; }
 .message-body p:last-child { margin-bottom: 0; }
 
-/* Stylizacja dymku Usera */
+/* 1. Dymek usera - ZWARTE DOPASOWANIE */
 .message.user .message-body { 
     background: var(--user-bubble); 
-    padding: 8px 12px; /* Mniejszy padding */
+    padding: 8px 12px; 
     border-radius: 18px 18px 0 18px; 
     text-align: left; 
     min-width: 0;
+    /* To sprawi, że dymek opnie się ciasno na zawartości */
+    display: flex; 
+    flex-direction: column;
 }
 
 /* 2. KLUCZOWE: Usuwamy marginesy z paragrafów wewnątrz dymku usera */
+/* Usuwamy absolutnie wszystkie marginesy wewnątrz dymku usera */
+.message.user .message-content,
 .message.user .message-content p { 
-    margin-bottom: 0 !important; /* Usuwa odstęp na dole dymku */
-    margin-top: 0 !important;
-}
-
-.message.user .message-content {
-    padding: 0 !important; /* Usuwa wewnętrzny padding kontenera treści */
+    margin: 0 !important; 
+    padding: 0 !important;
 }
 
 /* Domyślne paragrafy dla reszty (asystent) mogą mieć mały odstęp */
@@ -138,30 +139,37 @@ body {
 .thought-container.expanded .thought-content { max-height: none; }
 .thought-container.expanded .chevron { transform: rotate(180deg); }
 
-/* 3. Naprawa odstępów w Stats i Final Thoughts */
+/* 2. Stats & Final Thoughts - USUNIĘCIE DZIURY */
 .stats-container, .final-thoughts-container {
-  margin-top: 6px; 
-  padding-top: 6px; 
+  margin-top: 4px; 
+  padding-top: 4px; 
   border-top: 1px solid var(--border); 
   font-size: 0.85em;
-  display: flex; flex-direction: column; /* Układ flex pozwala kontrolować odstępy */
-  gap: 0; /* Brak luki między elementami flex */
+  /* Flexbox z zerowym gapem usuwa "powietrze" między elementami */
+  display: flex; 
+  flex-direction: column; 
+  gap: 0 !important; 
 }
 
-/* Style nagłówków (generowane przez JS) */
+/* Nagłówki - przyklejone do dołu */
 .stats-header, .final-thoughts-header {
     font-size: 0.95em; 
     font-weight: 700; 
-    margin-bottom: 2px !important; /* Minimalny odstęp od treści */
+    margin-bottom: 2px !important; /* Minimalny odstęp */
     display: flex; align-items: center; gap: 6px;
+    line-height: 1.2;
 }
 
 /* Nagłówki sekcji - mniejszy margin-bottom */
 .stats-header { color: var(--success); }
 .final-thoughts-header { color: var(--accent); }
 
-.stats-container p, .final-thoughts-container p { 
-    margin: 0 !important; 
+/* Treść pod nagłówkami - przyklejona do góry */
+.stats-container p, .final-thoughts-container p,
+.stats-container div, .final-thoughts-container div { 
+    margin-top: 0 !important; 
+    padding-top: 0 !important;
+    line-height: 1.4;
 }
 
 /* --- FOOTER --- */
@@ -776,19 +784,18 @@ function normalizeMessageDataForRender(msgData = {}) {
 function replaceRawHeaders(htmlText) {
     if (!htmlText) return '';
     
-    // ZMIANA: Regex jest teraz "HTML-agnostic". 
-    // Ignoruje tagi <p>, <strong>, <b>, ** i spacje wokół znacznika.
-    // Dzięki temu zadziała nawet jak Markdown zrobi z tego <p><strong>[[Stats]]</strong></p>
+    // ZMIANA: Regex teraz łapie [[Stats]] nawet bez pogrubienia (**).
+    // Ignoruje też otaczające tagi <p> czy <br>, które bot mógł dodać.
     
     // Zamiana Stats
     htmlText = htmlText.replace(
-        /(?:<p>|<strong>|<b>|\*\*|)\s*\[\[Stats\]\]\s*(?:<\/p>|<\/strong>|<\/b>|\*\*|)/gi, 
+        /(?:<p>|<strong>|<b>|\*\*|\s)*\[\[Stats\]\](?:<\/p>|<\/strong>|<\/b>|\*\*|\s|:)*/gi, 
         '<div class="stats-header">📊 Stats</div>'
     );
 
     // Zamiana Final Thoughts
     htmlText = htmlText.replace(
-        /(?:<p>|<strong>|<b>|\*\*|)\s*\[\[Final Thoughts\]\]\s*(?:<\/p>|<\/strong>|<\/b>|\*\*|)/gi, 
+        /(?:<p>|<strong>|<b>|\*\*|\s)*\[\[Final Thoughts\]\](?:<\/p>|<\/strong>|<\/b>|\*\*|\s|:)*/gi, 
         '<div class="final-thoughts-header">💭 Final Thoughts</div>'
     );
 
