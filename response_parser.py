@@ -2,10 +2,31 @@
 from __future__ import annotations
 
 import re
-from typing import Dict
+from typing import Dict, Tuple
 
 
 _SECTION_KEYS = ("thoughts", "content", "stats", "final_thoughts")
+
+
+def _extract_prefixed_section(text: str, label: str) -> Tuple[str, str]:
+    """Return a tuple of (section_body, remaining_text).
+
+    Acts as a safety net for responses that prefix sections with ``label:`` but omit
+    the expected markers. Pulling these stray sections out ensures the UI renders
+    them in the right place instead of mixing them with the main answer.
+    """
+
+    if not text:
+        return "", text
+
+    pattern = rf"^\s*{re.escape(label)}\s*:\s*(.+?)(?:\n{{2,}}|\r?\n\r?\n|$)"
+    match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return "", text
+
+    section = match.group(1).strip()
+    remaining = (text[: match.start()] + text[match.end() :]).strip()
+    return section, remaining
 
 
 def parse_full_response(full_response: str) -> Dict[str, str]:
@@ -51,6 +72,10 @@ def parse_full_response(full_response: str) -> Dict[str, str]:
                 r"^\*\*\[\[Thoughts\]\]\*\*\s*", "", raw_thoughts, flags=re.IGNORECASE
             ).strip()
             remaining_text = (remaining_text[: thoughts_match.start()] + remaining_text[thoughts_match.end() :]).strip()
+
+    if not response_data["thoughts"]:
+        extracted_thoughts, remaining_text = _extract_prefixed_section(remaining_text, "thoughts")
+        response_data["thoughts"] = extracted_thoughts
 
     final_thoughts_match = re.search(r"(\*\*\[\[Final Thoughts\]\]\*\*[\s\S]*)", remaining_text, re.IGNORECASE)
     if final_thoughts_match:
