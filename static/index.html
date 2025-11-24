@@ -42,13 +42,41 @@ body {
 .message { display: flex; flex-direction: column; gap: 4px; max-width: 80%; animation: fadeIn 0.3s ease-in; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 /* ZMIANA: Dodano align-items, aby dymki nie rozciągały się na całą szerokość */
-.message { display: flex; flex-direction: column; gap: 4px; max-width: 80%; animation: fadeIn 0.3s ease-in; }
-.message.user { align-self: flex-end; align-items: flex-end; } 
-.message.assistant { align-self: flex-start; align-items: flex-start; }
-.message.system { align-self: center; align-items: center; max-width: 90%; opacity: 0.7; }
+/* ZMIANA: align-self i align-items sprawiają, że dymek dopasowuje się do treści */
+.message { 
+    display: flex; 
+    flex-direction: column; 
+    gap: 4px; 
+    max-width: 80%; 
+    animation: fadeIn 0.3s ease-in;
+    /* Domyślnie na środku, ale nadpiszemy to niżej */
+    align-self: center; 
+}
 
-/* ZMIANA: Usunięto width: 100% i dodano min-width: 0 */
-.message-body { display: flex; flex-direction: column; min-width: 0; }
+.message.user { 
+    align-self: flex-end; 
+    align-items: flex-end; /* Wyrównuje zawartość do prawej */
+}
+
+.message.assistant { 
+    align-self: flex-start; 
+    align-items: flex-start; /* Wyrównuje zawartość do lewej */
+}
+
+.message.system { 
+    align-self: center; 
+    align-items: center; 
+    max-width: 90%; 
+    opacity: 0.7; 
+}
+
+/* ZMIANA: min-width: 0 zapobiega dziwnym problemom flexboxa */
+.message-body { 
+    display: flex; 
+    flex-direction: column; 
+    min-width: 0; 
+    width: fit-content; /* Dymek zajmuje tylko tyle miejsca ile potrzebuje */
+}
 .message-content {
     font-size: 0.95rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
     position: relative; overflow-wrap: anywhere; padding: 4px 0;
@@ -64,13 +92,39 @@ body {
 }
 .thought-container {
   font-size: 0.85em; color: var(--text-secondary); white-space: pre-wrap; word-break: break-word; font-family: monospace;
-  border-bottom: 1px solid var(--border); padding: 8px 12px 10px; margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
   cursor: pointer; transition: max-height 0.25s ease-in-out; position: relative;
-  background: var(--bg-secondary);
+  background: var(--bg-tertiary); /* Lekkie przyciemnienie ramki thoughts */
+  padding: 8px 12px 10px;
+  border-radius: 8px; /* Lekkie zaokrąglenie dla ramki */
+  margin-bottom: 8px; /* Oddzielenie od odpowiedzi */
+  border: 1px solid rgba(255, 255, 255, 0.05); /* Delikatna ramka */
   scrollbar-width: none;
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+/* Nadajemy statystykom i finalnym myślom wygląd nagłówków */
+.stats-header {
+    font-size: 1.0em;
+    font-weight: 600;
+    color: #10b981; /* Zielony kolor akcentu */
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.stats-header svg, .final-thoughts-header svg {
+    opacity: 0.8;
+}
+.final-thoughts-header {
+    font-size: 1.0em;
+    font-weight: 600;
+    color: var(--accent); /* Główny kolor akcentu */
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 .thought-container::-webkit-scrollbar { display: none; }
 .thought-container .thought-header {
@@ -80,15 +134,20 @@ body {
 .thought-container .thought-header .chevron { opacity: 0.8; transition: transform 0.2s ease; }
 .thought-container .thought-content {
   display: block; overflow-y: auto; margin-top: 0; padding-top: 0;
-  max-height: 3.1em; /* ~2 lines */
-  line-height: 1.35;
+  max-height: 4.1em; /* ~2 lines */
+  line-height: 2.35;
 }
 .thought-container .thought-content::-webkit-scrollbar { display: none; }
 .thought-container.expanded { max-height: none; overflow: visible; }
 .thought-container.expanded .thought-content { max-height: none; }
 .thought-container.expanded .chevron { transform: rotate(180deg); }
+/* Nowe style dla kontenerów sekcji */
 .stats-container, .final-thoughts-container {
-  padding: 8px 0 0 0; margin-top: 8px; border-top: 1px solid var(--border); font-size: 0.85em;
+  padding: 8px 0 0 0; 
+  margin-top: 8px; 
+  border-top: 1px solid var(--border); 
+  font-size: 0.85em;
+  /* Dodajemy separator przed Stats i Final Thoughts */
 }
 .message-footer {
   display: flex; align-items: center; gap: 12px;
@@ -597,43 +656,70 @@ function parseFullResponse(fullText) {
     let tempText = fullText || '';
     let thoughts = '', stats = '', finalThoughts = '', cleanContent = '';
 
-    // Funkcja pomocnicza: wycina sekcję i aktualizuje tekst
-    const extractAndRemove = (start, end) => {
-        const result = extractWrappedSection(tempText, start, end);
-        if (result.section) {
-            tempText = result.remaining;
-            return result.section;
+    // 1. Sprawdź, czy mamy zamknięcie myśli (standardowe lub XML)
+    // To jest kluczowe dla strumieniowania.
+    const closingThinkMatch = tempText.match(/<\/think>|<\/BEGIN_THOUGHTS>/i);
+
+    if (closingThinkMatch) {
+        // SCENARIUSZ A: Mamy już zamkniętą myśl.
+        // Dzielimy tekst na część "Myśl" (przed tagiem) i "Resztę" (po tagu).
+        const splitIndex = closingThinkMatch.index;
+        
+        // Wszystko przed zamknięciem to myśli
+        thoughts = tempText.substring(0, splitIndex);
+        
+        // Wszystko po zamknięciu (i po tagu zamykającym) to reszta do dalszego parsowania
+        tempText = tempText.substring(splitIndex + closingThinkMatch[0].length);
+        
+    } else {
+        // SCENARIUSZ B (Strumieniowanie): Nie ma jeszcze zamknięcia myśli.
+        // Tutaj realizujemy Twoją logikę "Force first sentence to think".
+        
+        // Sprawdzamy, czy w tekście NIE MA innej sekcji (np. Answer zaczął się bez zamykania myśli - błąd modelu)
+        const otherSectionMatch = tempText.match(/<BEGIN_ANSWER>|<BEGIN_STATS>|<BEGIN_FINAL>/i);
+        
+        if (!otherSectionMatch) {
+            // Jeśli nie ma innych sekcji, ZAKŁADAMY, że wszystko co leci to myśli.
+            // Dzięki temu tekst trafia do kontenera thoughts, a nie do głównego okna.
+            thoughts = tempText;
+            tempText = ''; // Zjedliśmy wszystko jako myśli
         }
-        return null;
+        // Jeśli jest otherSectionMatch, to znaczy, że model pominął zamknięcie myśli,
+        // więc pozwalamy standardowemu parserowi niżej zająć się resztą.
+    }
+
+    // --- Dalsze parsowanie reszty (Stats, Final Thoughts, Answer) ---
+
+    // Funkcja pomocnicza do wycinania
+    const extractAndRemove = (text, start, end) => {
+        const result = extractWrappedSection(text, start, end);
+        return result;
     };
 
-    // 1. THOUGHTS: Sprawdzamy oba warianty tagów.
-    // Najpierw standardowy <BEGIN_THOUGHTS>
-    let th = extractAndRemove('<BEGIN_THOUGHTS>', '</BEGIN_THOUGHTS>');
-    
-    // Jeśli nie znaleziono, szukamy <think>. 
-    // WAŻNE: Robimy to TYLKO jeśli th jest puste, aby nie nadpisać znaleziska.
-    if (!th) {
-        th = extractAndRemove('<think>', '</think>');
+    // Czyścimy myśli ze śmieciowych tagów (otwierających, jeśli model je jednak wypluł)
+    if (thoughts) thoughts = stripThinkTags(thoughts);
+
+    // Wyciągamy Stats
+    const statsRes = extractAndRemove(tempText, '<BEGIN_STATS>', '</BEGIN_STATS>');
+    if (statsRes.section) {
+        stats = statsRes.section;
+        tempText = statsRes.remaining;
     }
-    
-    if (th) thoughts = stripThinkTags(th);
 
-    // 2. STATS
-    const st = extractAndRemove('<BEGIN_STATS>', '</BEGIN_STATS>');
-    if (st) stats = st;
+    // Wyciągamy Final Thoughts
+    const finalRes = extractAndRemove(tempText, '<BEGIN_FINAL>', '</BEGIN_FINAL>');
+    if (finalRes.section) {
+        finalThoughts = finalRes.section;
+        tempText = finalRes.remaining;
+    }
 
-    // 3. FINAL THOUGHTS
-    const fin = extractAndRemove('<BEGIN_FINAL>', '</BEGIN_FINAL>');
-    if (fin) finalThoughts = fin;
-
-    // 4. ANSWER
-    const ans = extractAndRemove('<BEGIN_ANSWER>', '</BEGIN_ANSWER>');
-    if (ans) {
-        cleanContent = ans;
+    // Wyciągamy Answer (Explicit)
+    const ansRes = extractAndRemove(tempText, '<BEGIN_ANSWER>', '</BEGIN_ANSWER>');
+    if (ansRes.section) {
+        cleanContent = ansRes.section;
     } else {
-        // Fallback: To co zostało, jest treścią
-        cleanContent = tempText.trim();
+        // Implicit Answer: To co zostało, jest treścią
+        if (tempText.trim()) cleanContent = tempText.trim();
     }
 
     // Normalizacja nagłówków
@@ -672,6 +758,25 @@ function normalizeMessageDataForRender(msgData = {}) {
     return normalized;
 }
 
+// Dodaj nową funkcję do transformacji nagłówków [[]] na ładny HTML
+function replaceRawHeaders(text) {
+    if (!text) return '';
+    
+    // Zastąp [[Stats]]
+    text = text.replace(
+        /\*\*\[\[Stats\]\]\*\*/i, 
+        '<div class="stats-header">📊 Stats</div>'
+    );
+
+    // Zastąp [[Final Thoughts]]
+    text = text.replace(
+        /\*\*\[\[Final Thoughts\]\]\*\*/i, 
+        '<div class="final-thoughts-header">💭 Final Thoughts</div>'
+    );
+
+    return text;
+}
+
 function updateOrCreateElement(parent, selector, content, position = 'append') {
     if (!content || content.trim() === '') {
         const el = parent.querySelector(selector);
@@ -682,21 +787,27 @@ function updateOrCreateElement(parent, selector, content, position = 'append') {
     let element = parent.querySelector(selector);
     if (!element) {
         element = document.createElement('div');
-        element.className = selector.substring(1); // e.g., '.thought-container' -> 'thought-container'
+        element.className = selector.substring(1); // np. '.thought-container' -> 'thought-container'
         if (position === 'prepend') parent.prepend(element);
         else parent.appendChild(element);
     }
 
     element.style.display = 'block';
-    const htmlContent = renderMarkdown(content);
+    let htmlContent = renderMarkdown(content); // Używamy let
+
+    // Zastosowanie ładnych nagłówków tylko dla Stats i Final Thoughts
+    if (selector === '.stats-container' || selector === '.final-thoughts-container') {
+        htmlContent = replaceRawHeaders(htmlContent);
+    }
 
     if (selector === '.thought-container') {
         const wasExpanded = element.classList.contains('expanded');
         if (!element.innerHTML.trim()) {
+            // Dodano ikonę w nagłówku
             element.innerHTML = `
                 <div class="thought-header" role="button" aria-expanded="false">
                     <span class="chevron">▼</span>
-                    <span>Thoughts</span>
+                    <span>💭 Thoughts</span>
                 </div>
                 <div class="thought-content"></div>`;
         }
@@ -884,10 +995,19 @@ function handlePartialMessage(chunk){
   }
   appState.fullResponseText += (chunk || '');
   const parsed = parseFullResponse(appState.fullResponseText);
+
+  // 1. Myśli (prepend - na samej górze)
   updateOrCreateElement(body, '.thought-container', parsed.thoughts, 'prepend');
-  updateOrCreateElement(body, '.message-content', parsed.content, 'append');
+  
+  // 2. Odpowiedź główna (message-content - append)
+  updateOrCreateElement(body, '.message-content', parsed.content, 'append'); 
+  
+  // 3. Statystyki (append)
   updateOrCreateElement(body, '.stats-container', parsed.stats, 'append');
+  
+  // 4. Final Thoughts (append - na samym dole)
   updateOrCreateElement(body, '.final-thoughts-container', parsed.final_thoughts, 'append');
+  
   scrollToBottom();
 }
 
