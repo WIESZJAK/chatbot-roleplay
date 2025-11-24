@@ -41,12 +41,16 @@ body {
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
 /* --- MESSAGES LIST --- */
+/* --- MESSAGES LIST --- */
 .chat-messages {
   flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px;
 }
-.chat-messages::-webkit-scrollbar { width: 8px; }
-.chat-messages::-webkit-scrollbar-track { background: transparent; }
-.chat-messages::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
+/* STARY KOD BYŁ TUTAJ TYLKO DLA .chat-messages */
+/* ZAMIENIAMY NA GLOBALNY: */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
 
 /* --- MESSAGE BUBBLES --- */
 .message { 
@@ -74,10 +78,24 @@ body {
 /* Stylizacja dymku Usera */
 .message.user .message-body { 
     background: var(--user-bubble); 
-    padding: 10px 16px; /* Symetryczny padding */
+    padding: 8px 14px; /* Mniejszy padding ogólny */
     border-radius: 18px 18px 0 18px; 
     text-align: left; 
 }
+
+/* --- KLUCZOWE: Usuwamy marginesy paragrafów wewnątrz dymku usera --- */
+.message.user .message-content p { 
+    margin-bottom: 0; 
+}
+
+.message.user .message-content {
+    padding-bottom: 0; /* Dodatkowe zabezpieczenie */
+}
+
+/* Domyślne paragrafy dla reszty (asystent) mogą mieć mały odstęp */
+.message-content p { margin: 0 0 6px 0; }
+/* Ale ostatni element ZAWSZE bez marginesu */
+.message-content > *:last-child { margin-bottom: 0 !important; }
 
 /* Stylizacja dymku Systemu */
 .message.system .message-body {
@@ -118,28 +136,31 @@ body {
 .thought-container.expanded .thought-content { max-height: none; }
 .thought-container.expanded .chevron { transform: rotate(180deg); }
 
-/* --- STATS & FINAL THOUGHTS (KOMPAKTOWE) --- */
+/* --- STATS & FINAL THOUGHTS (ZACIEŚNIONE) --- */
 .stats-container, .final-thoughts-container {
-  /* Zmniejszony margin-top (odstęp od linii) i padding-top */
-  margin-top: 6px; 
-  padding-top: 6px; 
+  /* Zmniejszony odstęp od linii oddzielającej */
+  margin-top: 4px; 
+  padding-top: 4px; 
   border-top: 1px solid var(--border); 
-  font-size: 0.9rem; width: 100%;
+  font-size: 0.85em; 
+  width: 100%;
+  display: flex; flex-direction: column; gap: 0; /* Zero luki systemowej */
+}
+
+/* Nagłówki - minimalny margines dolny */
+.stats-header, .final-thoughts-header {
+    font-size: 0.95em; font-weight: 700;
+    margin-bottom: 2px; /* Bardzo blisko treści */
+    display: flex; align-items: center; gap: 6px;
 }
 
 /* Nagłówki sekcji - mniejszy margin-bottom */
-.stats-header {
-    font-size: 0.95em; font-weight: 700; color: var(--success);
-    margin-bottom: 2px; display: flex; align-items: center; gap: 6px;
-}
-.final-thoughts-header {
-    font-size: 0.95em; font-weight: 700; color: var(--accent);
-    margin-bottom: 2px; display: flex; align-items: center; gap: 6px;
-}
+.stats-header { color: var(--success); }
+.final-thoughts-header { color: var(--accent); }
 
-/* Usuwamy górny margines z tekstu wewnątrz tych kontenerów, żeby przykleił się do nagłówka */
-.stats-container p, .final-thoughts-container p {
-    margin-top: 0;
+.stats-container p, .final-thoughts-container p { 
+    margin: 0 !important; 
+    line-height: 1.4;
 }
 
 /* --- FOOTER --- */
