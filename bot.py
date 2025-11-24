@@ -584,7 +584,13 @@ def build_prompt_context(chat_id: str, user_msg: str, settings: Dict[str, Any]) 
     system_parts.append(f"You are: {persona.get('name')}. {persona.get('short_description')}")
     if persona.get("traits"): system_parts.append("Traits: " + ", ".join(persona.get("traits", [])))
     if persona.get("history"): system_parts.append("History: " + persona.get("history"))
-    if persona.get("behavior_instructions"): system_parts.append("Behavior rules: " + persona.get("behavior_instructions"))
+    behavior_instructions = persona.get("behavior_instructions")
+    if behavior_instructions:
+        if isinstance(behavior_instructions, list):
+            behavior_text = "\n".join([str(item) for item in behavior_instructions if item])
+        else:
+            behavior_text = str(behavior_instructions)
+        system_parts.append("Behavior rules: " + behavior_text)
     
     system_parts.append(f"Current time: {datetime.utcnow().isoformat() + 'Z'}. Use this to track time and day/night in your responses.")
     if settings.get("persistent_stats", False):
@@ -612,6 +618,8 @@ def build_prompt_context(chat_id: str, user_msg: str, settings: Dict[str, Any]) 
         system_parts.append(f"**CRITICAL CONTEXT: A NEW DAY/SESSION HAS BEGUN!**\n- **Instructions:** {greeting_instruction}\n- After the greeting, respond to the user's message as usual.\n")
 
     output_instructions = persona.get("output_instructions", DEFAULT_PERSONA["output_instructions"])
+    if isinstance(output_instructions, list):
+        output_instructions = "\n".join([str(item) for item in output_instructions if item])
     reinforced_output_instructions = (
         "**MANDATORY OUTPUT FORMATTING RULES:**\n"
         "You MUST follow this structure for every single response. No exceptions. Each section requires its marker.\n"
