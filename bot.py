@@ -1277,6 +1277,29 @@ function parseFullResponse(fullText) {
     return { content: cleanContent, thoughts, stats, final_thoughts: finalThoughts };
 }
 
+function normalizeMessageDataForRender(msgData = {}) {
+    const normalized = {
+        content: msgData.content || '',
+        thoughts: msgData.thoughts || '',
+        stats: msgData.stats || '',
+        final_thoughts: msgData.final_thoughts || msgData.finalThoughts || ''
+    };
+
+    const hasInlineStructuredBlocks = /<think\b[^>]*>|\*\*\[\[Thoughts\]\]\*\*/i.test(normalized.content);
+    if (hasInlineStructuredBlocks) {
+        const parsed = parseFullResponse(normalized.content);
+        normalized.content = parsed.content || normalized.content;
+        normalized.thoughts = normalized.thoughts || parsed.thoughts;
+        normalized.stats = normalized.stats || parsed.stats;
+        normalized.final_thoughts = normalized.final_thoughts || parsed.final_thoughts;
+    }
+
+    normalized.stats = normalizeLabeledSection(normalized.stats, 'Stats');
+    normalized.final_thoughts = normalizeLabeledSection(normalized.final_thoughts, 'Final Thoughts');
+
+    return normalized;
+}
+
 function updateOrCreateElement(parent, selector, content, position = 'append') {
     if (!content || content.trim() === '') {
         const el = parent.querySelector(selector);
@@ -1338,10 +1361,12 @@ function renderMessage(msgWrapper, msgData) {
     if (!msgBody) return;
     msgBody.innerHTML = ''; // Clear for final, clean render
 
-    updateOrCreateElement(msgBody, '.thought-container', msgData.thoughts, 'prepend');
-    updateOrCreateElement(msgBody, '.message-content', msgData.content, 'append');
-    updateOrCreateElement(msgBody, '.stats-container', msgData.stats, 'append');
-    updateOrCreateElement(msgBody, '.final-thoughts-container', msgData.final_thoughts, 'append');
+    const normalized = normalizeMessageDataForRender(msgData);
+
+    updateOrCreateElement(msgBody, '.thought-container', normalized.thoughts, 'prepend');
+    updateOrCreateElement(msgBody, '.message-content', normalized.content, 'append');
+    updateOrCreateElement(msgBody, '.stats-container', normalized.stats, 'append');
+    updateOrCreateElement(msgBody, '.final-thoughts-container', normalized.final_thoughts, 'append');
 }
 
 // --- Main Application Logic ---
