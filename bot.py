@@ -1518,6 +1518,8 @@ function scrollToBottom() {
 async function sendMessage() {
     const message = DOM.chatInput.value.trim();
     if (!message || appState.isGenerating) return;
+    appState.fullResponseText = '';
+    appState.isStreamInitialized = false;
     DOM.memoryPanel.style.display = 'none';
     DOM.memoryContent.innerHTML = '';
     DOM.chatInput.value = '';
@@ -2307,6 +2309,14 @@ async def websocket_endpoint(ws: WebSocket):
     # ZMIANA: Cała funkcja została przeniesiona i zmodyfikowana, aby używać klienta asynchronicznego
     async def process_and_stream_response(messages: List[Dict], settings: Dict, chat_id: str):
         stop_generation.clear()
+
+        # Notify the client that a fresh generation cycle is starting so it can
+        # reset any buffered partial text from previous replies. Previously this
+        # signal was only sent during regenerations, which could leave the
+        # frontend reusing stale `fullResponseText` and showing repeated
+        # content. Broadcasting the start event for every turn keeps the UI in
+        # sync with the server-side stream.
+        await ws.send_text(json.dumps({"type": "start"}))
         
         memory_message = next((m['content'] for m in messages if m['role'] == 'system' and 'Relevant memories:' in m['content']), None)
         if memory_message:
