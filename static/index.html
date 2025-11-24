@@ -633,6 +633,23 @@ function stripThinkTags(text) {
         .trim();
 }
 
+// --- NOWE FUNKCJE POMOCNICZE (Wklej pod stripThinkTags) ---
+
+function formatStatsContent(text) {
+    if (!text) return '';
+    // 1. Usuń nagłówek tekstowy (z gwiazdkami lub bez)
+    let clean = text.replace(/(\*\*\[\[Stats\]\]\*\*|\[\[Stats\]\]|Stats:)/gi, '').trim();
+    
+    // 2. Napraw nowe linie: Zamień przecinki na <br> lub nowe linie
+    // Model często pisze: "Mood: Happy, Health: 100" -> chcemy to w pionie.
+    // Szukamy przecinka, po którym jest spacja (opcjonalnie) i litera.
+    clean = clean.replace(/,\s/g, '\n');
+    
+    return clean;
+}
+
+
+
 function extractWrappedSection(text, startTag, endTag) {
     if (!text) return { section: '', remaining: text };
     
@@ -684,19 +701,11 @@ function extractPrefixedSection(text, label) {
     return { section, remaining };
 }
 
-function formatStatsContent(text) {
-    if (!text) return '';
-    // 1. Usuń nagłówek tekstowy jeśli został ([[Stats]] itp)
-    text = text.replace(/(\*\*\[\[Stats\]\]\*\*|\[\[Stats\]\]|Stats:)/gi, '').trim();
-    // 2. Zamień przecinki między statystykami na nowe linie
-    // Szuka przecinka, po którym następuje słowo i dwukropek (np. ", Mood:") lub po prostu przecinka z odstępem
-    text = text.replace(/, /g, '\n');
-    return text;
-}
+
 
 function cleanFinalThoughts(text) {
     if (!text) return '';
-    // Usuń nagłówek tekstowy
+    // Po prostu usuń nagłówek, resztę zostaw
     return text.replace(/(\*\*\[\[Final Thoughts\]\]\*\*|\[\[Final Thoughts\]\]|Final Thoughts:)/gi, '').trim();
 }
 
@@ -715,13 +724,17 @@ function parseFullResponse(fullText) {
         return '';
     };
 
-    // 1. Wyciągnij Final Thoughts i wyczyść nagłówek
+    // 1. Wyciągnij i WYCZYŚĆ Final Thoughts
     let rawFinal = extractSectionFromEnd(/(\*\*\[\[Final Thoughts\]\]\*\*|\[\[Final Thoughts\]\])([\s\S]*)$/i);
-    if (rawFinal) finalThoughts = cleanFinalThoughts(rawFinal);
+    if (rawFinal) {
+        finalThoughts = cleanFinalThoughts(rawFinal);
+    }
 
-    // 2. Wyciągnij Stats, wyczyść nagłówek i sformatuj (nowe linie)
+    // 2. Wyciągnij, WYCZYŚĆ i SFORMATUJ Stats
     let rawStats = extractSectionFromEnd(/(\*\*\[\[Stats\]\]\*\*|\[\[Stats\]\])([\s\S]*)$/i);
-    if (rawStats) stats = formatStatsContent(rawStats);
+    if (rawStats) {
+        stats = formatStatsContent(rawStats);
+    }
 
     // 3. Obsługa Myśli (Force Think Logic)
     const closingThinkMatch = tempText.match(/<\/think>/i);
@@ -730,13 +743,13 @@ function parseFullResponse(fullText) {
         thoughts = tempText.substring(0, splitIndex);
         cleanContent = tempText.substring(splitIndex + closingThinkMatch[0].length).trim();
     } else {
-        // Jeśli brak zamknięcia, sprawdzamy czy bot zaczął odpowiadać tagiem Answer
+        // Sprawdzamy czy bot zaczął odpowiadać tagiem Answer (rzadkie, ale możliwe)
         const answerTag = tempText.match(/<BEGIN_ANSWER>/i);
         if (answerTag) {
              thoughts = tempText.substring(0, answerTag.index);
              cleanContent = tempText.substring(answerTag.index + answerTag[0].length).trim();
         } else {
-             // Streaming: wszystko to myśli
+             // Jeśli nie ma zamknięcia myśli ani Stats/Final, to wszystko jest myślą (streaming)
              thoughts = tempText;
              cleanContent = ''; 
         }
@@ -744,8 +757,7 @@ function parseFullResponse(fullText) {
 
     if (thoughts) thoughts = stripThinkTags(thoughts);
 
-    // UWAGA: Nie używamy już normalizeLabeledSection ani replaceRawHeaders tutaj.
-    // Zwracamy CZYSTĄ treść. Nagłówki doda updateOrCreateElement.
+    // WAŻNE: Zwracamy czyste dane. Nagłówki HTML doda dopiero funkcja updateOrCreateElement.
     return { content: cleanContent, thoughts, stats, final_thoughts: finalThoughts };
 }
 
@@ -817,18 +829,14 @@ function updateOrCreateElement(parent, selector, content, position = 'append') {
 
     element.style.display = 'block';
     
-    // Renderujemy treść (która jest już wyczyszczona z nagłówków tekstowych)
+    // Renderujemy Markdown (treść jest już czysta)
     let htmlContent = renderMarkdown(content);
 
-    // --- TUTAJ JEST NAPRAWA NAGŁÓWKÓW ---
-    // Zamiast replaceRawHeaders, doklejamy nagłówek "na sztywno" na początku HTML
-    
+    // DOKLEJAMY NAGŁÓWKI RĘCZNIE
     if (selector === '.stats-container') {
-        // Doklejamy nagłówek Stats
         htmlContent = `<div class="stats-header">📊 Stats</div>` + htmlContent;
     } 
     else if (selector === '.final-thoughts-container') {
-        // Doklejamy nagłówek Final Thoughts
         htmlContent = `<div class="final-thoughts-header">💭 Final Thoughts</div>` + htmlContent;
     }
 
@@ -847,18 +855,20 @@ function updateOrCreateElement(parent, selector, content, position = 'append') {
         if (contentEl && contentEl.innerHTML !== htmlContent) {
             contentEl.innerHTML = htmlContent;
         }
-        // ... (reszta logiki scrollowania thoughts)
+        
+        // Auto-scroll dla myśli
         const contentDiv = element.querySelector('.thought-content');
         if(contentDiv && !element.classList.contains('expanded')) {
             requestAnimationFrame(() => contentDiv.scrollTop = contentDiv.scrollHeight);
         }
-        // toggle logic...
+        
+        // Listener rozwijania
         if (!element.hasToggleListener) {
              element.querySelector('.thought-header').addEventListener('click', () => element.classList.toggle('expanded'));
              element.hasToggleListener = true;
         }
     } else {
-        // Dla Stats, Final Thoughts i Message Content
+        // Aktualizacja HTML dla reszty kontenerów
         if (element.innerHTML !== htmlContent) {
             element.innerHTML = htmlContent;
         }
