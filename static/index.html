@@ -771,21 +771,27 @@ function normalizeMessageDataForRender(msgData = {}) {
         final_thoughts: msgData.final_thoughts || msgData.finalThoughts || ''
     };
 
-    // POPRAWKA: Rozszerzona detekcja znaczników. 
-    // Teraz sprawdzamy też Stats, Final Thoughts oraz tagi XML <BEGIN_...>.
-    const structureRegex = /<think\b[^>]*>|\*\*\[\[Thoughts\]\]\*\*|\*\*\[\[Stats\]\]\*\*|\*\*\[\[Final Thoughts\]\]\*\*|<BEGIN_[A-Z]+>/i;
-    
-    const hasInlineStructuredBlocks = structureRegex.test(normalized.content);
-
+    // Jeśli treść zawiera znaczniki, próbujemy ją sparsować (dla legacy messages)
+    const hasInlineStructuredBlocks = /<think\b[^>]*>|\*\*\[\[Thoughts\]\]\*\*/i.test(normalized.content);
     if (hasInlineStructuredBlocks) {
         const parsed = parseFullResponse(normalized.content);
-        // Jeśli parser coś wyciągnął, aktualizujemy pola, ale nie nadpisujemy istniejących, jeśli są puste w wyniku parsowania
         normalized.content = parsed.content || normalized.content;
-        if(parsed.thoughts) normalized.thoughts = parsed.thoughts;
-        if(parsed.stats) normalized.stats = parsed.stats;
-        if(parsed.final_thoughts) normalized.final_thoughts = parsed.final_thoughts;
+        normalized.thoughts = normalized.thoughts || parsed.thoughts;
+        normalized.stats = normalized.stats || parsed.stats;
+        normalized.final_thoughts = normalized.final_thoughts || parsed.final_thoughts;
     }
 
+    // --- KLUCZOWA POPRAWKA: ZAWSZE CZYŚCIMY DANE PRZED RENDEREM ---
+    // To naprawia duplikaty po odświeżeniu strony/zakończeniu generowania
+    if (normalized.stats) {
+        normalized.stats = formatStatsContent(normalized.stats);
+    }
+    
+    if (normalized.final_thoughts) {
+        normalized.final_thoughts = cleanFinalThoughts(normalized.final_thoughts);
+    }
+
+    // Znormalizuj etykiety (dodatkowe zabezpieczenie)
     normalized.stats = normalizeLabeledSection(normalized.stats, 'Stats');
     normalized.final_thoughts = normalizeLabeledSection(normalized.final_thoughts, 'Final Thoughts');
 
