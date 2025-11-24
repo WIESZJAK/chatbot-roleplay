@@ -152,10 +152,30 @@ def _normalize_labeled_block(text: str, header: str) -> str:
 def parse_full_response(full_response: str) -> Dict[str, str]:
     response_data = {"thoughts": "", "content": "", "stats": "", "final_thoughts": ""}
     remaining_text = full_response
-    thoughts_match = re.search(r'<think>([\s\S]*?)</think>', remaining_text, re.DOTALL)
-    if thoughts_match:
-        response_data["thoughts"] = thoughts_match.group(1).strip()
-        remaining_text = remaining_text.replace(thoughts_match.group(0), '', 1)
+
+    think_open_match = re.search(r"<think\b[^>]*>", remaining_text, re.IGNORECASE)
+    if think_open_match:
+        think_start = think_open_match.start()
+        think_content_start = think_open_match.end()
+        think_close_match = re.search(r"</think\s*>", remaining_text[think_content_start:], re.IGNORECASE)
+
+        if think_close_match:
+            think_content_end = think_content_start + think_close_match.start()
+            removal_end = think_content_end + len(think_close_match.group(0))
+        else:
+            remainder_after_think = remaining_text[think_content_start:]
+            fallback_end = len(remaining_text)
+            for pattern in (r"\*\*\[\[Stats\]\]\*\*", r"\*\*\[\[Final Thoughts\]\]\*\*"):
+                marker_match = re.search(pattern, remainder_after_think, re.IGNORECASE)
+                if marker_match:
+                    fallback_end = think_content_start + marker_match.start()
+                    break
+            think_content_end = fallback_end
+            removal_end = think_content_end
+
+        response_data["thoughts"] = remaining_text[think_content_start:think_content_end].strip()
+        remaining_text = remaining_text[:think_start] + remaining_text[removal_end:]
+
     final_thoughts_match = re.search(r'(\*\*\[\[Final Thoughts\]\]\*\*[\s\S]*)', remaining_text, re.IGNORECASE)
     if final_thoughts_match:
         response_data["final_thoughts"] = final_thoughts_match.group(0).strip()
@@ -1187,11 +1207,30 @@ function normalizeLabeledSection(text, header) {
 function parseFullResponse(fullText) {
     let tempText = fullText;
     let thoughts = '', stats = '', finalThoughts = '', cleanContent = '';
-    const thinkMatch = tempText.match(/<think\s*>([\s\S]*?)<\/think\s*>/is);
-    if (thinkMatch) {
-        thoughts = thinkMatch[1].trim();
-        tempText = tempText.replace(thinkMatch[0], '');
+
+    const thinkOpenMatch = tempText.match(/<think\b[^>]*>/i);
+    if (thinkOpenMatch) {
+        const thinkContentStart = thinkOpenMatch.index + thinkOpenMatch[0].length;
+        const remainderAfterThink = tempText.slice(thinkContentStart);
+        const thinkCloseMatch = remainderAfterThink.match(/<\/think\s*>/i);
+
+        let thinkContentEnd = tempText.length;
+        let removalEnd = tempText.length;
+        if (thinkCloseMatch) {
+            thinkContentEnd = thinkContentStart + thinkCloseMatch.index;
+            removalEnd = thinkContentEnd + thinkCloseMatch[0].length;
+        } else {
+            const fallbackMatch = remainderAfterThink.match(/\*\*\[\[(Stats|Final Thoughts)\]\]\*\*/i);
+            if (fallbackMatch) {
+                thinkContentEnd = thinkContentStart + fallbackMatch.index;
+            }
+            removalEnd = thinkContentEnd;
+        }
+
+        thoughts = tempText.slice(thinkContentStart, thinkContentEnd).trim();
+        tempText = tempText.slice(0, thinkOpenMatch.index) + tempText.slice(removalEnd);
     }
+
     const finalThoughtsMatch = tempText.match(/(\*\*\[\[Final Thoughts\]\]\*\*[\s\S]*)/i);
     if (finalThoughtsMatch) {
         finalThoughts = finalThoughtsMatch[0].trim();
