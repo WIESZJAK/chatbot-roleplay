@@ -75,21 +75,24 @@ body {
 .message-body p { margin: 0 0 6px 0; }
 .message-body p:last-child { margin-bottom: 0; }
 
-/* 1. Dymek usera - ZWARTE DOPASOWANIE */
+/* 1. Kontener dymku */
 .message.user .message-body { 
     background: var(--user-bubble); 
-    padding: 8px 12px; 
+    padding: 8px 14px; 
     border-radius: 18px 18px 0 18px; 
     text-align: left; 
     min-width: 0;
-    /* To sprawi, że dymek opnie się ciasno na zawartości */
-    display: flex; 
-    flex-direction: column;
+    width: fit-content; /* Kluczowe: dopasowanie do treści */
+    display: block; /* Zmieniamy na block dla pewności */
 }
 
 /* 2. KLUCZOWE: Usuwamy marginesy z paragrafów wewnątrz dymku usera */
 /* Usuwamy absolutnie wszystkie marginesy wewnątrz dymku usera */
-.message.user .message-content,
+.message.user .message-content {
+    display: block;
+    margin: 0 !important;
+    padding: 0 !important;
+}
 .message.user .message-content p { 
     margin: 0 !important; 
     padding: 0 !important;
@@ -105,6 +108,16 @@ body {
   background: rgba(255,255,255,0.05); border: 1px solid var(--border); text-align: center;
   font-size: 0.875rem; color: var(--text-secondary); padding: 8px 16px; border-radius: 18px;
   white-space: pre-wrap; width: 100%;
+}
+
+/* 3. Paragrafy wewnątrz dymku usera - ZEROWANIE WSZYSTKIEGO */
+/* Używamy bardzo specyficznego selektora, żeby nadpisać wszystko inne */
+div.message.user div.message-body div.message-content p {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    line-height: 1.4; /* Lekko zmniejszona interlinia dla zwartości */
 }
 
 .message-content {
