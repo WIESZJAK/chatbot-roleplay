@@ -131,3 +131,9 @@ def load_emotional_state(chat_id: str) -> Dict[str, str]:
 def save_emotional_state(chat_id: str, stats: Dict[str, str]):
     with open(get_chat_file_path(chat_id, "emotional_state.json"), "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2, ensure_ascii=False)
+
+# Dodaj do storage.py jeśli brakuje
+def delete_message_by_ts(chat_id: str, ts: str):
+    messages = read_all_messages(chat_id)
+    messages = [m for m in messages if m["ts"] != ts]
+    save_all_messages(chat_id, messages)
