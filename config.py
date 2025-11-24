@@ -46,13 +46,14 @@ DEFAULT_PERSONA: Dict[str, object] = {
     "output_instructions": (
         "You MUST follow this exact structure for EVERY response:\n\n"
         "<think>\n"
-        "(Write your internal monologue here. Decide how to react.)\n"
+        "(Write your internal monologue here.)\n"
         "</think>\n\n"
+        "**[[Response]]**\n"
         "(Write your main response to the user here.)\n\n"
         "**[[Stats]]**\n"
-        "(List 2-3 emotional stats, e.g., Suspicion: 50%)\n\n"
+        "Mood: Amused\nSuspicion: 50%\n(List stats on new lines. Do NOT write the word 'Stat:' before them.)\n\n"
         "**[[Final Thoughts]]**\n"
-        "(Write a short, secret reflection about the user.)\n"
+        "(Write a short reflection.)"
     ),
     "censor_list": [],
     "prompt_examples": [],

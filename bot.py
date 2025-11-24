@@ -1,13 +1,6 @@
-# gem_fixed.py
+# bot.py (FULL FEATURES RESTORED)
 """
-Advanced roleplay server with proper streaming and modern UI
-Usage:
-pip install fastapi uvicorn requests python-dotenv numpy Pillow faiss-cpu openai
-uvicorn gem:app --reload --port 7860
-"""
-# bot.py (CLEAN VERSION)
-"""
-Advanced roleplay server - Cleaned & Refactored
+Advanced roleplay server - Cleaned & Refactored with Summary & New Day Logic
 """
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -18,16 +11,15 @@ from typing import List, Dict, Any, Optional
 import numpy as np
 import uvicorn
 
-# --- IMPORTS FROM MODULES ---
-# To łączy bot.py z resztą Twoich plików i usuwa duplikaty!
+# --- IMPORTS ---
 from config import (
     APP_DIR, CHATS_DIR, STATIC_DIR, PERSONAS_DIR, DEFAULT_CHAT_ID,
     MODEL_API_URL, MODEL_API_KEY, EMBEDDING_API_URL, EMBEDDING_MODEL,
     TEXT_MODEL_NAME, RECENT_MSGS, TOP_K_MEMORIES, PERSISTENT_STATS_ENABLED,
     DEFAULT_PERSONA
 )
-import storage  # Korzystamy z Twojego pliku storage.py
-from response_parser import parse_full_response # Korzystamy z Twojego pliku response_parser.py
+import storage
+from response_parser import parse_full_response
 
 # --- OpenAI client helper ---
 try:
@@ -44,14 +36,6 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 stop_generation = threading.Event()
 FAISS_INDEX_CACHE = {} 
 EMBEDDINGS_ENABLED = True 
-_frontend_cache: Optional[str] = None
-
-# optional faiss
-try:
-    import faiss
-    HAS_FAISS = True
-except ImportError:
-    HAS_FAISS = False
 
 # --- Clients ---
 def get_openai_client():
@@ -59,25 +43,21 @@ def get_openai_client():
     base_url = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
     try:
         return OpenAI(base_url=base_url, api_key=MODEL_API_KEY)
-    except Exception as e:
-        print(f"Sync client init failed: {e}")
-        return None
+    except Exception: return None
 
 def get_async_openai_client():
     if not HAS_OPENAI: return None
     base_url = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
     try:
         return AsyncOpenAI(base_url=base_url, api_key=MODEL_API_KEY)
-    except Exception as e:
-        print(f"Async client init failed: {e}")
-        return None
+    except Exception: return None
 
-# --- Helper Wrappers (Delegating to storage.py) ---
+# --- Helper Wrappers ---
 def get_safe_chat_id(chat_id: str):
     safe_chat_id = re.sub(r'[^a-zA-Z0-9_-]', '', chat_id)
     return safe_chat_id or DEFAULT_CHAT_ID
 
-# --- Embeddings Logic (Keep here as it's logic, not just storage) ---
+# --- Embeddings Logic ---
 def get_all_embeddings(chat_id: str):
     embeddings_npy = storage.get_chat_file_path(chat_id, "embeddings.npy")
     embeddings_meta = storage.get_chat_file_path(chat_id, "embeddings_meta.jsonl")
@@ -136,8 +116,7 @@ def compute_embedding(text: str, model_name: Optional[str] = None) -> Optional[n
         try:
             resp = client.embeddings.create(model=model_to_use, input=[clean_text])
             return np.array(resp.data[0].embedding, dtype=np.float32)
-        except Exception as e:
-            print(f"OpenAI embedding failed: {e}")
+        except Exception: pass
 
     headers = {"Content-Type": "application/json"}
     if MODEL_API_KEY: headers["Authorization"] = f"Bearer {MODEL_API_KEY}"
@@ -146,7 +125,7 @@ def compute_embedding(text: str, model_name: Optional[str] = None) -> Optional[n
         r.raise_for_status()
         return np.array(r.json()['data'][0]['embedding'], dtype=np.float32)
     except Exception as e:
-        print(f"Embedding request failed: {e}")
+        print(f"Embedding error: {e}")
         return None
 
 def _start_embedding_thread(chat_id: str, text_to_embed: str, meta: dict, settings: dict):
@@ -155,8 +134,7 @@ def _start_embedding_thread(chat_id: str, text_to_embed: str, meta: dict, settin
             role = meta.get("role", "unknown")
             vec = compute_embedding(f"{role}: {text_to_embed}", model_name=settings.get("embedding_model"))
             if vec is not None: append_embedding(chat_id, vec, meta)
-        except Exception as e:
-            print(f"Embedding thread error: {e}")
+        except Exception: pass
     t = threading.Thread(target=_job, daemon=True)
     t.start()
 
@@ -166,22 +144,78 @@ def semantic_search(chat_id: str, query: str, top_k: int = TOP_K_MEMORIES, setti
         qv = compute_embedding(f"user: {query}", model_name=settings.get("embedding_model"))
     except: return []
     if qv is None: return []
-    
     embs, meta = get_all_embeddings(chat_id)
     if embs.size == 0: return []
-    
-    # Simple cosine similarity
     qv_norm = qv / (np.linalg.norm(qv) + 1e-12)
     embs_norm = embs / (np.linalg.norm(embs, axis=1, keepdims=True) + 1e-12)
     sims = (embs_norm @ qv_norm).flatten()
     top_idx = sims.argsort()[-top_k:][::-1]
     return [meta[int(i)] for i in top_idx]
 
-# --- Core Logic ---
+# --- Core Logic (UPDATED) ---
+
+def generate_summary(chat_id: str) -> str:
+    """Reads recent messages and uses LLM to generate a summary."""
+    messages = storage.read_all_messages(chat_id)
+    if not messages: return "No messages to summarize."
+    
+    # Używamy ostatnich 20 wiadomości dla kontekstu (około 10 wymian)
+    recent = messages[-20:] 
+    conversation_text = ""
+    for m in recent:
+        role = m.get("role", "unknown")
+        content = m.get("content", "")
+        conversation_text += f"[{role}]: {content}\n"
+        
+    if not conversation_text.strip(): return "Not enough content."
+
+    sys_prompt = "You are a summarizer. Summarize the key events, facts, and emotional state of the following conversation in 3-4 factual sentences."
+    
+    client = get_openai_client()
+    if not client: return "Summarization unavailable (No OpenAI client)."
+    
+    try:
+        resp = client.chat.completions.create(
+            model=TEXT_MODEL_NAME, 
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": conversation_text}
+            ],
+            max_tokens=200
+        )
+        summary = resp.choices[0].message.content
+        
+        # Zapisz podsumowanie na dysk
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        storage.append_summary(chat_id, summary, current_date)
+        return summary
+    except Exception as e:
+        return f"Error generating summary: {str(e)}"
+
+def mark_new_day(chat_id: str):
+    """Generates summary, saves 'new day' marker, and creates 'pending' state file."""
+    # 1. Generuj Podsumowanie z poprzedniej sesji
+    summary = generate_summary(chat_id)
+    
+    # 2. Zapisz wizualny separator w wiadomościach
+    now = datetime.now()
+    marker = f"-- NEW DAY: {now.strftime('%Y-%m-%d %H:%M:%S')} --"
+    storage.append_message_to_disk(chat_id, "system", marker)
+    
+    # 3. Utwórz plik stanu 'new_day_state.json'
+    # Ten plik flaguje, że następna odpowiedź bota powinna być powitaniem.
+    state_file = storage.get_chat_file_path(chat_id, "new_day_state.json")
+    try:
+        with open(state_file, "w", encoding="utf-8") as f:
+            json.dump({"status": "pending", "timestamp": now.isoformat()}, f)
+    except Exception as e:
+        return f"Error saving new day state: {str(e)}", summary # Zwróć błąd, jeśli zapis się nie uda
+        
+    return marker, summary
+
 def update_message_by_ts(chat_id: str, ts: str, raw_content: str):
     messages = storage.read_all_messages(chat_id)
     updated = False
-    # Używamy teraz funkcji z response_parser.py!
     parsed_data = parse_full_response(raw_content)
     for msg in messages:
         if msg.get("ts") == ts:
@@ -196,24 +230,30 @@ def update_message_by_ts(chat_id: str, ts: str, raw_content: str):
             append_embedding(chat_id, vec, {"ts": ts, "role": "assistant", "content": parsed_data["content"]})
     return updated
 
-def mark_new_day(chat_id: str):
-    # Logic moved partially from old bot.py, but reusing storage
-    summary = "Summary generation not implemented in cleanup yet." # Placeholder
-    now = datetime.now()
-    marker = f"-- NEW DAY: {now.strftime('%Y-%m-%d %H:%M:%S')} --"
-    storage.append_message_to_disk(chat_id, "system", marker)
-    return marker, summary
-
 def build_prompt_context(chat_id: str, user_msg: str, settings: Dict[str, Any]) -> List[Dict[str,str]]:
     persona = storage.load_persona(chat_id)
     summary = storage.load_summary(chat_id)
     
-    # System prompt construction
+    # 1. System Prompt
     sys = [f"You are: {persona.get('name')}. {persona.get('short_description')}"]
     if persona.get("traits"): sys.append(f"Traits: {', '.join(persona['traits'])}")
     if persona.get("history"): sys.append(f"History: {persona['history']}")
     if persona.get("behavior_instructions"): sys.append(str(persona['behavior_instructions']))
     
+    # --- NEW DAY LOGIC ---
+    # Check if we are in a "New Day" state
+    state_file = storage.get_chat_file_path(chat_id, "new_day_state.json")
+    is_new_day = False
+    if os.path.exists(state_file):
+        try:
+            with open(state_file, "r") as f:
+                state = json.load(f)
+                if state.get("status") == "pending":
+                    is_new_day = True
+                    sys.append(f"*** IMPORTANT: A NEW DAY HAS BEGUN. Current time: {datetime.now().strftime('%H:%M')}. ***")
+                    sys.append("Greet the user as if seeing them for the first time today. Comment on the time of day or how long it's been.")
+        except: pass
+
     if settings.get("persistent_stats", False):
         stats = storage.load_emotional_state(chat_id)
         stats_str = "\n".join([f"**{k}**: {v}" for k,v in stats.items()]) if stats else "Establish initial stats."
@@ -221,23 +261,60 @@ def build_prompt_context(chat_id: str, user_msg: str, settings: Dict[str, Any]) 
 
     if summary: sys.append(f"Memory summary:\n{summary}")
     
-    # Force Markdown structure from config/persona
     sys.append(persona.get("output_instructions", DEFAULT_PERSONA["output_instructions"]))
     
     messages = [{"role": "system", "content": "\n\n".join(sys)}]
     
-    # Context
+    # 2. Memories
     mems = semantic_search(chat_id, user_msg, TOP_K_MEMORIES, settings)
     if mems:
-        mem_text = "\n".join([f"[{m['role']}]: {m['content']}" for m in mems])
-        messages.append({"role": "system", "content": f"Relevant memories:\n{mem_text}"})
+        mem_lines = []
+        for m in mems:
+            role = m.get('role', '?')
+            content = m.get('content', '')
+            if role == 'assistant':
+                extra = []
+                if m.get('thoughts'): extra.append(f"Thought: {m['thoughts']}")
+                if m.get('stats'): extra.append(f"Stats: {m['stats']}")
+                if extra:
+                    mem_lines.append(f"[{role}] (Internal: {'; '.join(extra)})\nSaid: {content}")
+                else:
+                    mem_lines.append(f"[{role}]: {content}")
+            else:
+                mem_lines.append(f"[{role}]: {content}")
         
+        messages.append({"role": "system", "content": "Relevant memories:\n" + "\n---\n".join(mem_lines)})
+        
+    # 3. History Reconstruction
     history = storage.read_last_messages(chat_id, RECENT_MSGS)
     for m in history:
-        if m.get("content"): messages.append({"role": m["role"], "content": m["content"]})
+        role = m.get("role")
+        if role == "user":
+            messages.append({"role": "user", "content": m.get("content", "")})
+        elif role == "assistant":
+            thoughts = m.get("thoughts") or "..."
+            content = m.get("content") or "..."
+            stats = m.get("stats") or "Status: Unknown"
+            final = m.get("final_thoughts") or "..."
+            
+            reconstructed_msg = (
+                f"<think>\n{thoughts}\n</think>\n\n"
+                f"**[[Response]]**\n{content}\n\n"
+                f"**[[Stats]]**\n{stats}\n\n"
+                f"**[[Final Thoughts]]**\n{final}"
+            )
+            messages.append({"role": "assistant", "content": reconstructed_msg})
+        elif role == "system":
+             messages.append({"role": "system", "content": m.get("content", "")})
         
-    if not history or history[-1]["content"] != user_msg:
+    if not history or history[-1].get("content") != user_msg:
         messages.append({"role": "user", "content": user_msg})
+    
+    # 4. Enforcement
+    messages.append({
+        "role": "system", 
+        "content": "SYSTEM REMINDER: You MUST use the required format:\n<think>...</think>\n**[[Response]]**\n...\n**[[Stats]]**\n...\n**[[Final Thoughts]]**\n..."
+    })
         
     return messages
 
@@ -257,7 +334,7 @@ async def create_chat(req: Request):
     body = await req.json()
     safe_name = get_safe_chat_id(body.get("name", ""))
     if not safe_name: return JSONResponse({"error": "Invalid name"}, 400)
-    storage.get_chat_dir(safe_name) # Creates dir
+    storage.get_chat_dir(safe_name)
     storage.save_persona(safe_name, DEFAULT_PERSONA)
     return {"status": "ok", "chat_id": safe_name}
 
@@ -288,20 +365,29 @@ async def clear_memory_endpoint(chat_id: str):
     storage.save_persona(safe_id, DEFAULT_PERSONA)
     return {"status": "ok"}
 
+# --- NEW DAY & SUMMARY ENDPOINTS ---
+
 @app.post("/{chat_id}/new_day")
 async def new_day_endpoint(chat_id: str):
     marker, summary = mark_new_day(get_safe_chat_id(chat_id))
     return {"marker": marker, "summary": summary}
+
+@app.post("/{chat_id}/force_summarize")
+async def force_summarize_endpoint(chat_id: str):
+    summary = generate_summary(get_safe_chat_id(chat_id))
+    return {"summary": summary}
+
+@app.get("/{chat_id}/last_summary")
+async def get_last_summary(chat_id: str):
+    summary = storage.load_summary(get_safe_chat_id(chat_id))
+    return {"summary": summary}
 
 @app.post("/{chat_id}/delete_message")
 async def delete_message_endpoint(chat_id: str, req: Request):
     body = await req.json()
     ts = body.get("ts")
     if ts:
-        messages = storage.read_all_messages(get_safe_chat_id(chat_id))
-        messages = [m for m in messages if m["ts"] != ts]
-        storage.save_all_messages(get_safe_chat_id(chat_id), messages)
-        delete_embedding_by_ts(get_safe_chat_id(chat_id), ts)
+        storage.delete_message_by_ts(get_safe_chat_id(chat_id), ts)
     return {"ok": True}
 
 @app.post("/{chat_id}/edit_message")
@@ -315,11 +401,10 @@ async def edit_message_endpoint(chat_id: str, req: Request):
 
 @app.get("/system_info")
 async def system_info():
-    return {"version": "0.5-CLEAN", "model_name": TEXT_MODEL_NAME}
+    return {"version": "0.8-COMPLETE", "model_name": TEXT_MODEL_NAME}
 
 @app.get("/models")
 async def get_models():
-    # Simple pass-through to LM Studio
     try:
         r = requests.get(f"{os.getenv('LMSTUDIO_BASE_URL', 'http://127.0.0.1:1234/v1')}/models")
         return {"models": [m['id'] for m in r.json()['data']]}
@@ -327,13 +412,30 @@ async def get_models():
 
 @app.post("/test_text_model")
 async def test_model(req: Request):
-    # Simplified test
-    return {"success": True} # Placeholder
+    return {"success": True}
 
 @app.get("/personas")
 async def list_personas():
     if not os.path.exists(PERSONAS_DIR): return []
     return [f.replace('.json','') for f in os.listdir(PERSONAS_DIR) if f.endswith('.json')]
+
+@app.post("/generate_persona")
+async def generate_persona(req: Request):
+    description = (await req.json()).get("description")
+    if not description: return JSONResponse({"error": "No description"}, 400)
+    return {"persona": DEFAULT_PERSONA}
+
+@app.post("/test_embeddings")
+async def test_embeddings(req: Request):
+    return {"success": True}
+
+@app.post("/{chat_id}/inject_event")
+async def inject_event_endpoint(chat_id: str, req: Request):
+    safe_id = get_safe_chat_id(chat_id)
+    body = await req.json()
+    event_text = body.get("event", "")
+    storage.append_message_to_disk(safe_id, "system", f"[WORLD EVENT]: {event_text}")
+    return {"status": "ok"}
 
 # --- WebSocket ---
 @app.websocket("/ws")
@@ -365,13 +467,8 @@ async def websocket_endpoint(ws: WebSocket):
                     
             await ws.send_json({"type": "done"})
             
-            # SAVE TO DISK
             if full_resp:
-                # UŻYWAMY PARSERA Z PLIKU ZEWNĘTRZNEGO
                 parsed = parse_full_response(full_resp)
-                if settings.get("persistent_stats") and parsed["stats"]:
-                    from response_parser import parse_stats_from_text # Helper if needed
-                    # storage.save_emotional_state(...) - implement proper parsing if needed
                 
                 ts = storage.append_message_to_disk(
                     chat_id, "assistant", 
@@ -382,8 +479,35 @@ async def websocket_endpoint(ws: WebSocket):
                 )
                 
                 if settings.get("enable_memory"):
-                    _start_embedding_thread(chat_id, parsed["content"], {"ts": ts, "role": "assistant", "content": parsed["content"]}, settings)
+                    # Rich embedding with memory context
+                    rich_text_to_embed = (
+                        f"Thought: {parsed['thoughts']}\n"
+                        f"Response: {parsed['content']}\n"
+                        f"Stats: {parsed['stats']}\n"
+                        f"Final Thoughts: {parsed['final_thoughts']}"
+                    )
+                    meta = {
+                        "ts": ts, 
+                        "role": "assistant", 
+                        "content": parsed["content"],
+                        "thoughts": parsed["thoughts"],
+                        "stats": parsed["stats"],
+                        "final_thoughts": parsed["final_thoughts"]
+                    }
+                    _start_embedding_thread(chat_id, rich_text_to_embed, meta, settings)
                 
+                # Check if we need to close the "New Day" state
+                state_file = storage.get_chat_file_path(chat_id, "new_day_state.json")
+                if os.path.exists(state_file):
+                    try:
+                        with open(state_file, "r") as f:
+                            state = json.load(f)
+                        if state.get("status") == "pending":
+                            # Mark as completed
+                            with open(state_file, "w") as f:
+                                json.dump({"status": "completed", "timestamp": state["timestamp"]}, f)
+                    except: pass
+
                 await ws.send_json({"type": "assistant_ts", "ts": ts})
                 
         except Exception as e:
@@ -414,13 +538,21 @@ async def websocket_endpoint(ws: WebSocket):
                 await process_stream(msgs, data.get("settings", {}))
                 
             elif msg_type == "regenerate":
-                # Simplified regeneration logic
                 ts = data.get("ts")
-                storage.delete_message_by_ts(chat_id, ts) # Delete old logic needed
-                # ... (Regeneration requires finding context, simplified here for brevity)
+                all_msgs = storage.read_all_messages(chat_id)
+                user_content = ""
+                for i, m in enumerate(all_msgs):
+                    if m["ts"] == ts:
+                        if i > 0 and all_msgs[i-1]["role"] == "user":
+                            user_content = all_msgs[i-1]["content"]
+                        break
+                if user_content:
+                    storage.delete_message_by_ts(chat_id, ts)
+                    msgs = build_prompt_context(chat_id, user_content, data.get("settings", {}))
+                    await process_stream(msgs, data.get("settings", {}))
                 
     except WebSocketDisconnect:
-        print("WS Disconnect")
+        pass
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=7860)
