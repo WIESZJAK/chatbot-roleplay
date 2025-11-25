@@ -29,7 +29,7 @@ MODEL_API_KEY = os.getenv("MODEL_API_KEY", "lm-studio")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5")
 TEXT_MODEL_NAME = os.getenv("TEXT_MODEL", "local-model")
 RECENT_MSGS = int(os.getenv("RECENT_MSGS", "20"))
-SUMMARIZE_EVERY = int(os.getenv("SUMMARIZE_EVERY", "30"))
+SUMMARIZE_EVERY = int(os.getenv("SUMMARIZE_EVERY", "20"))
 TOP_K_MEMORIES = int(os.getenv("TOP_K_MEMORIES", "5"))
 CHUNK_SIZE = int(os.getenv("STREAM_CHUNK_SIZE", "5"))
 PERSISTENT_STATS_ENABLED = os.getenv("PERSISTENT_STATS_ENABLED", "True").lower() == "true"
@@ -59,16 +59,4 @@ DEFAULT_PERSONA: Dict[str, object] = {
     ),
     "censor_list": [],
     "prompt_examples": [],
-}
-
-# Domyślne ustawienia dla nowych czatów
-DEFAULT_SETTINGS = {
-    "model": "", # Pusty string oznacza domyślny model z LM Studio
-    "embedding_model": "",
-    "temperature": 1.0,
-    "max_tokens": 1024,
-    "thought_ratio": 0.5,
-    "talkativeness": 0.5,
-    "persistent_stats": True,
-    "enable_memory": True
 }

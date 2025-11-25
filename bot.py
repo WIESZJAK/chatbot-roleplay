@@ -16,7 +16,7 @@ from config import (
     APP_DIR, CHATS_DIR, STATIC_DIR, PERSONAS_DIR, DEFAULT_CHAT_ID,
     MODEL_API_URL, MODEL_API_KEY, EMBEDDING_API_URL, EMBEDDING_MODEL,
     TEXT_MODEL_NAME, RECENT_MSGS, TOP_K_MEMORIES, PERSISTENT_STATS_ENABLED,
-    DEFAULT_PERSONA, DEFAULT_SETTINGS  # <--- DODAJ TO TUTAJ (pamiętaj o przecinku przed)
+    DEFAULT_PERSONA
 )
 import storage
 from response_parser import parse_full_response
@@ -343,8 +343,6 @@ async def create_chat(req: Request):
     if not safe_name: return JSONResponse({"error": "Invalid name"}, 400)
     storage.get_chat_dir(safe_name)
     storage.save_persona(safe_name, DEFAULT_PERSONA)
-    # NOWE: Zapisz domyślne ustawienia dla nowego czatu
-    storage.save_chat_settings(safe_name, DEFAULT_SETTINGS) 
     return {"status": "ok", "chat_id": safe_name}
 
 @app.delete("/chats/{chat_id}")
@@ -357,16 +355,6 @@ async def delete_chat_endpoint(chat_id: str):
 @app.get("/{chat_id}/messages")
 async def get_messages(chat_id: str):
     return storage.read_all_messages(get_safe_chat_id(chat_id))
-
-@app.get("/{chat_id}/settings")
-async def get_chat_settings(chat_id: str):
-    return storage.load_chat_settings(get_safe_chat_id(chat_id))
-
-@app.post("/{chat_id}/settings")
-async def save_chat_settings_endpoint(chat_id: str, req: Request):
-    body = await req.json()
-    storage.save_chat_settings(get_safe_chat_id(chat_id), body)
-    return {"status": "ok"}
 
 @app.get("/{chat_id}/persona")
 async def get_persona(chat_id: str):
