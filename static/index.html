@@ -9,6 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.9/dist/purify.min.js"></script>
 </head>
 <body>
+
 <div id="app-container" class="container">
   <div id="left-panel-toggle" class="panel-toggle-handle left-handle">◀</div>
   <div id="left-panel" class="side-panel left-panel collapsed">
@@ -24,7 +25,7 @@
     <div class="panel-section">
       <div class="panel-title panel-toggle">Persona</div>
       <div class="collapsible-content show">
-          <img id="persona-avatar" src="/avatars/default.png" style="width:100%; height:auto; aspect-ratio: 1/1; border-radius:12px; object-fit:cover; margin: 0 auto 10px auto; border: 2px solid var(--border);">
+          <img id="persona-avatar" src="/static/default_avatar.png" style="width:100%; height:auto; aspect-ratio: 1/1; border-radius:12px; object-fit:cover; margin: 0 auto 10px auto; border: 2px solid var(--border);">
           <div style="display:flex; gap: 8px;">
             <select id="side-panel-persona-preset" class="side-panel-input" style="flex:1;"></select>
             <button class="btn" id="side-panel-load-btn">Load</button>
@@ -248,6 +249,7 @@
 </div>
 
 <script>
+    // Zmienna globalna dla zewnętrznego pliku JS
     window.SERVER_CONFIG = {
         persistentStats: __PERSISTENT_STATS_ENABLED__
     };
